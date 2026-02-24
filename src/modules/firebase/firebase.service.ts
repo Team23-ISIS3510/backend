@@ -16,8 +16,6 @@ export class FirebaseService implements OnModuleInit {
   private initializeApp() {
     try {
       if (!admin.apps.length) {
-        // Initialize with service account from environment variables.
-        // Support multiple env formats so local .env with GOOGLE_SERVICE_ACCOUNT_KEY works.
         let projectId = this.configService.get('FIREBASE_PROJECT_ID');
         let clientEmail = this.configService.get('FIREBASE_CLIENT_EMAIL');
         let privateKey = this.configService.get('FIREBASE_PRIVATE_KEY');
@@ -93,13 +91,13 @@ export class FirebaseService implements OnModuleInit {
           this.app = admin.initializeApp(config);
         }
 
-        this.logger.log('✅ Firebase Admin SDK initialized successfully');
+        this.logger.log('Firebase Admin SDK initialized successfully');
       } else {
         this.app = admin.app();
-        this.logger.log('✅ Firebase Admin SDK already initialized');
+        this.logger.log('Firebase Admin SDK already initialized');
       }
     } catch (error) {
-      this.logger.error('❌ Failed to initialize Firebase Admin SDK:', error);
+      this.logger.error('Failed to initialize Firebase Admin SDK:', error);
       throw error;
     }
   }
