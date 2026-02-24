@@ -1,0 +1,70 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipientId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipientId", "order": "ASCENDING" },
+        { "fieldPath": "isRead", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "availabilities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tutorId", "order": "ASCENDING" },
+        { "fieldPath": "startDateTime", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "availabilities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course", "order": "ASCENDING" },
+        { "fieldPath": "startDateTime", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tutorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tutoring_sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tutorId", "order": "ASCENDING" },
+        { "fieldPath": "scheduledStart", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tutoring_sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "scheduledStart", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
