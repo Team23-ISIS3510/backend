@@ -133,41 +133,40 @@ export class SlotService {
 
     this.logger.log(`Applying bookings to ${slots.length} slots`);
 
-    // Group slots by parentAvailabilityId for efficient querying
-    const slotsByAvailability = new Map<string, Slot[]>();
+    // Group slots by tutorId so we only query sessions once per tutor instead of per availability
+    const slotsByTutor = new Map<string, Slot[]>();
     slots.forEach((slot) => {
-      if (!slotsByAvailability.has(slot.parentAvailabilityId)) {
-        slotsByAvailability.set(slot.parentAvailabilityId, []);
+      if (!slot.tutorId) {
+        return;
       }
-      slotsByAvailability.get(slot.parentAvailabilityId)!.push(slot);
+      if (!slotsByTutor.has(slot.tutorId)) {
+        slotsByTutor.set(slot.tutorId, []);
+      }
+      slotsByTutor.get(slot.tutorId)!.push(slot);
     });
 
-    // Get bookings for all availabilities
-    const bookingPromises = Array.from(slotsByAvailability.keys()).map(async (availabilityId) => {
+    // Get bookings for all tutors
+    const bookingPromises = Array.from(slotsByTutor.keys()).map(async (tutorId) => {
       try {
-        // Get sessions that might be booked for this availability
-        // We'll need to check if sessions overlap with slots
-        const sessions = await this.tutoringSessionService.getSessionsByTutor(
-          slots.find((s) => s.parentAvailabilityId === availabilityId)?.tutorId || '',
-          100,
-        );
-        return { availabilityId, sessions };
+        const sessions = await this.tutoringSessionService.getSessionsByTutor(tutorId, 100);
+        return { tutorId, sessions };
       } catch (error) {
-        this.logger.warn(`Error getting bookings for availability ${availabilityId}:`, error);
-        return { availabilityId, sessions: [] };
+        this.logger.warn(`Error getting bookings for tutor ${tutorId}:`, error);
+        return { tutorId, sessions: [] as TutoringSession[] };
       }
     });
 
     const bookingResults = await Promise.all(bookingPromises);
-    const bookingsByAvailability = new Map<string, TutoringSession[]>();
+    const bookingsByTutor = new Map<string, TutoringSession[]>();
 
-    bookingResults.forEach(({ availabilityId, sessions }) => {
-      bookingsByAvailability.set(availabilityId, sessions);
+    bookingResults.forEach(({ tutorId, sessions }) => {
+      bookingsByTutor.set(tutorId, sessions);
     });
 
-    // Apply bookings to slots
+    // Apply bookings to slots using tutor-level session data
     return slots.map((slot) => {
-      const sessions = bookingsByAvailability.get(slot.parentAvailabilityId) || [];
+      const sessions =
+        (slot.tutorId ? bookingsByTutor.get(slot.tutorId) : undefined) || [];
       const slotStart = new Date(slot.startDateTime);
       const slotEnd = new Date(slot.endDateTime);
 

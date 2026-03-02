@@ -727,14 +727,10 @@ export class AvailabilityController {
 
       this.logger.log(`Generating slots from ${dto.availabilityIds.length} availabilities`);
 
-      // Get availabilities by IDs
-      const availabilityPromises = dto.availabilityIds.map((id) =>
-        this.availabilityService.getAvailabilityById(id),
+      // Get availabilities by IDs in a batched, optimized way
+      const availabilities = await this.availabilityService.getAvailabilitiesByIds(
+        dto.availabilityIds,
       );
-
-      const availabilities = (await Promise.all(availabilityPromises)).filter(
-        (a) => a !== null,
-      ) as AvailabilityResponseDto[];
 
       if (availabilities.length === 0) {
         throw new HttpException(

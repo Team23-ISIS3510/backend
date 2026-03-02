@@ -319,6 +319,7 @@ export class AvailabilityRepository {
     tutorId: string,
     startDate: Date,
     endDate: Date,
+    limitCount: number = 100,
   ): Promise<Availability[]> {
     try {
       const db = this.firebaseService.getFirestore();
@@ -331,6 +332,7 @@ export class AvailabilityRepository {
         .where('startDateTime', '>=', startTimestamp)
         .where('startDateTime', '<=', endTimestamp)
         .orderBy('startDateTime', 'asc')
+        .limit(limitCount)
         .get();
 
       const availabilities: Availability[] = [];
@@ -359,6 +361,59 @@ export class AvailabilityRepository {
       return availabilities;
     } catch (error) {
       this.logger.error('Error finding by tutor and date range:', error);
+      throw error;
+    }
+  }
+
+  async findByIds(ids: string[]): Promise<Availability[]> {
+    try {
+      if (!ids || ids.length === 0) {
+        return [];
+      }
+
+      const db = this.firebaseService.getFirestore();
+      const CHUNK_SIZE = 10; // Firestore "in" queries support up to 10 values
+      const availabilities: Availability[] = [];
+      const processedIds = new Set<string>();
+
+      for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+        const chunk = ids.slice(i, i + CHUNK_SIZE);
+
+        const snapshot = await db
+          .collection(this.COLLECTION)
+          .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+          .get();
+
+        snapshot.forEach((doc) => {
+          if (processedIds.has(doc.id)) {
+            return;
+          }
+          processedIds.add(doc.id);
+
+          const data = doc.data();
+          availabilities.push({
+            id: doc.id,
+            tutorId: data.tutorId,
+            title: data.title,
+            location: data.location,
+            startDateTime: this.safeToDate(data.startDateTime),
+            endDateTime: this.safeToDate(data.endDateTime),
+            googleEventId: data.googleEventId,
+            eventLink: data.eventLink || data.htmlLink || null,
+            recurring: data.recurring,
+            recurrenceRule: data.recurrenceRule,
+            sourceCalendarId: data.sourceCalendarId,
+            sourceCalendarName: data.sourceCalendarName,
+            course: data.course,
+            createdAt: this.safeToDate(data.createdAt),
+            updatedAt: this.safeToDate(data.updatedAt),
+          } as Availability);
+        });
+      }
+
+      return availabilities;
+    } catch (error) {
+      this.logger.error('Error finding by IDs:', error);
       throw error;
     }
   }
