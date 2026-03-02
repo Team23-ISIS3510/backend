@@ -19,7 +19,7 @@ import {
   GetConsecutiveSlotsDto,
 } from '../availability/dto/slot.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBody } from '@nestjs/swagger';
-import { Request } from 'express';
+import type { Request } from 'express';
 
 @ApiTags('Availability')
 @Controller('availability')
@@ -295,7 +295,6 @@ export class AvailabilityController {
 
       return {
         success: true,
-        message: result.message,
         ...result,
       };
     } catch (error) {
