@@ -1,11 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AvailabilityRepository } from './availability.repository';
-import { GetAvailabilityDto } from './dto/get-availability.dto';
-import { AvailabilityResponseDto } from './dto/availability-response.dto';
-import { Availability } from './entities/availability.entity';
+import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
+import { AvailabilityResponseDto } from '../availability/dto/availability-response.dto';
+import { Availability } from '../availability/entities/availability.entity';
 import { CalendarService } from '../calendar/calendar.service';
-import { SlotService } from './slot.service';
-import { Slot } from './slot.service';
+import { SlotService } from '../availability/slot.service';
+import { Slot } from '../availability/slot.service';
 
 @Injectable()
 export class AvailabilityService {
