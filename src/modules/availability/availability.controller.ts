@@ -10,7 +10,7 @@ import {
   GenerateJointSlotsDto,
   GenerateJointSlotsWeekDto,
   GetJointAvailabilityStatsDto,
-} from './dto/joint-availability.dto';
+} from '../availability/dto/joint-availability.dto';
 import {
   GenerateSlotsDto,
   GenerateSlotsFromAvailabilitiesDto,
