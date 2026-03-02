@@ -3,9 +3,9 @@ import { AvailabilityRepository } from './availability.repository';
 import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
 import { AvailabilityResponseDto } from '../availability/dto/availability-response.dto';
 import { Availability } from '../availability/entities/availability.entity';
-import { CalendarService } from '../calendar/calendar.service';
-import { SlotService } from '../availability/slot.service';
-import { Slot } from '../availability/slot.service';
+import { CalendarService } from '../../modules/calendar/calendar.service';
+import { SlotService } from '../../modules/availability/slot.service';
+import { Slot } from '../../modules/availability/slot.service';
 
 @Injectable()
 export class AvailabilityService {
