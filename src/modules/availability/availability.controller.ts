@@ -1,10 +1,10 @@
 import { Controller, Get, Post, Delete, Query, Body, Param, HttpException, HttpStatus, Logger, Req } from '@nestjs/common';
 import { AvailabilityService } from './availability.service';
-import { SlotService } from './slot.service';
-import { GetAvailabilityDto } from './dto/get-availability.dto';
-import { CheckEventDto, SyncAvailabilityDto, SyncSpecificEventsDto } from './dto/sync-availability.dto';
-import { CreateAvailabilityDto } from './dto/create-availability.dto';
-import { AvailabilityResponseDto } from './dto/availability-response.dto';
+import { SlotService } from '../availability/slot.service';
+import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
+import { CheckEventDto, SyncAvailabilityDto, SyncSpecificEventsDto } from '../availability/dto/sync-availability.dto';
+import { CreateAvailabilityDto } from '../availability/dto/create-availability.dto';
+import { AvailabilityResponseDto } from '../availability/dto/availability-response.dto';
 import {
   GetMultipleTutorsAvailabilityDto,
   GenerateJointSlotsDto,
@@ -17,7 +17,7 @@ import {
   ValidateSlotDto,
   CheckSlotAvailabilityDto,
   GetConsecutiveSlotsDto,
-} from './dto/slot.dto';
+} from '../availability/dto/slot.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBody } from '@nestjs/swagger';
 import { Request } from 'express';
 
