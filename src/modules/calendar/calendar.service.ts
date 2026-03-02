@@ -19,7 +19,6 @@ export class CalendarService {
   async getAuthUrl(format?: 'json'): Promise<string> {
     let redirectUri = this.configService.get('GOOGLE_REDIRECT_URI');
     
-    // If redirect URI is not set, use default based on PORT
     if (!redirectUri) {
       const port = this.configService.get('PORT') || 3001;
       redirectUri = `http://localhost:${port}/api/calendar/callback`;
@@ -28,7 +27,6 @@ export class CalendarService {
     
     // IMPORTANT: Google OAuth requires the redirect URI to match EXACTLY what's registered
     // We cannot include query parameters in the redirect URI sent to Google
-    // The format=json parameter will be added by the callback endpoint when Google redirects
     this.logger.log(`Using redirect URI (base, no query params): ${redirectUri}`);
     
     const scopes = [
@@ -39,14 +37,13 @@ export class CalendarService {
     const oauth2Client = new google.auth.OAuth2(
       this.configService.get('GOOGLE_CLIENT_ID'),
       this.configService.get('GOOGLE_CLIENT_SECRET'),
-      redirectUri, // Use base URI without query params
+      redirectUri,
     );
 
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
       prompt: 'consent',
-      // Add state parameter to indicate format preference
       state: format === 'json' ? 'format=json' : undefined,
     });
 
