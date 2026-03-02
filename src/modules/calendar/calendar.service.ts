@@ -6,145 +6,105 @@ import { google } from 'googleapis';
 export class CalendarService {
   private readonly logger = new Logger(CalendarService.name);
 
-  constructor(private configService: ConfigService) {}
+  private readonly clientId: string;
+  private readonly clientSecret: string;
+  private readonly redirectUri: string;
 
-  getOAuth2Client() {
-    return new google.auth.OAuth2(
-      this.configService.get('GOOGLE_CLIENT_ID'),
-      this.configService.get('GOOGLE_CLIENT_SECRET'),
-      this.configService.get('GOOGLE_REDIRECT_URI'),
-    );
+  private readonly scopes = [
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/calendar.events',
+  ];
+
+  constructor(private readonly configService: ConfigService) {
+    this.clientId = configService.get<string>('GOOGLE_CLIENT_ID') ?? '';
+    this.clientSecret = configService.get<string>('GOOGLE_CLIENT_SECRET') ?? '';
+
+    const configuredUri = configService.get<string>('GOOGLE_REDIRECT_URI');
+    if (!configuredUri) {
+      const port = configService.get<string>('PORT') ?? '3001';
+      this.redirectUri = `http://localhost:${port}/api/calendar/callback`;
+      this.logger.warn(`GOOGLE_REDIRECT_URI not set, using default: ${this.redirectUri}`);
+    } else {
+      this.redirectUri = configuredUri;
+    }
+  }
+
+  private buildAuthClient(credentials?: { access_token?: string; refresh_token?: string }) {
+    const client = new google.auth.OAuth2(this.clientId, this.clientSecret, this.redirectUri);
+    if (credentials) {
+      client.setCredentials(credentials);
+    }
+    return client;
+  }
+
+  private getCalendarApi(accessToken: string) {
+    return google.calendar({ version: 'v3', auth: this.buildAuthClient({ access_token: accessToken }) });
+  }
+
+  getRedirectUri(): string {
+    return this.redirectUri;
   }
 
   async getAuthUrl(format?: 'json'): Promise<string> {
-    let redirectUri = this.configService.get('GOOGLE_REDIRECT_URI');
-    
-    if (!redirectUri) {
-      const port = this.configService.get('PORT') || 3001;
-      redirectUri = `http://localhost:${port}/api/calendar/callback`;
-      this.logger.warn(`GOOGLE_REDIRECT_URI not set, using default: ${redirectUri}`);
-    }
-    
-    // IMPORTANT: Google OAuth requires the redirect URI to match EXACTLY what's registered
-    // We cannot include query parameters in the redirect URI sent to Google
-    this.logger.log(`Using redirect URI (base, no query params): ${redirectUri}`);
-    
-    const scopes = [
-      'https://www.googleapis.com/auth/calendar.readonly',
-      'https://www.googleapis.com/auth/calendar.events',
-    ];
-
-    const oauth2Client = new google.auth.OAuth2(
-      this.configService.get('GOOGLE_CLIENT_ID'),
-      this.configService.get('GOOGLE_CLIENT_SECRET'),
-      redirectUri,
-    );
-
-    const url = oauth2Client.generateAuthUrl({
+    const url = this.buildAuthClient().generateAuthUrl({
       access_type: 'offline',
-      scope: scopes,
+      scope: this.scopes,
       prompt: 'consent',
       state: format === 'json' ? 'format=json' : undefined,
     });
-
-    this.logger.log(`Generated auth URL. Callback will be: ${redirectUri}${format === 'json' ? '?format=json' : ''}`);
+    this.logger.log(`Generated auth URL with redirect URI: ${this.redirectUri}`);
     return url;
   }
 
   async exchangeCodeForTokens(code: string) {
+    const { tokens } = await this.buildAuthClient().getToken(code);
+    return tokens;
+  }
+
+  /**
+   * Validates an access token via the OAuth2 tokeninfo endpoint.
+   * Much lighter than a full Calendar API call — no calendar data is fetched.
+   */
+  async verifyToken(accessToken: string): Promise<boolean> {
     try {
-      const oauth2Client = this.getOAuth2Client();
-      const { tokens } = await oauth2Client.getToken(code);
-      return tokens;
-    } catch (error) {
-      this.logger.error('Error exchanging code for tokens:', error);
-      throw error;
+      await this.buildAuthClient().getTokenInfo(accessToken);
+      return true;
+    } catch {
+      return false;
     }
   }
 
   async listCalendars(accessToken: string) {
-    try {
-      const oauth2Client = this.getOAuth2Client();
-      oauth2Client.setCredentials({ access_token: accessToken });
-
-      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-      const response = await calendar.calendarList.list();
-
-      return response.data.items || [];
-    } catch (error) {
-      this.logger.error('Error listing calendars:', error);
-      throw error;
-    }
+    const response = await this.getCalendarApi(accessToken).calendarList.list();
+    return response.data.items ?? [];
   }
 
   async listEvents(accessToken: string, calendarId: string, timeMin?: string, timeMax?: string) {
-    try {
-      const oauth2Client = this.getOAuth2Client();
-      oauth2Client.setCredentials({ access_token: accessToken });
-
-      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-      const response = await calendar.events.list({
-        calendarId,
-        timeMin: timeMin || new Date().toISOString(),
-        timeMax,
-        maxResults: 100,
-        singleEvents: true,
-        orderBy: 'startTime',
-      });
-
-      return response.data.items || [];
-    } catch (error) {
-      this.logger.error('Error listing events:', error);
-      throw error;
-    }
+    const response = await this.getCalendarApi(accessToken).events.list({
+      calendarId,
+      timeMin: timeMin ?? new Date().toISOString(),
+      timeMax,
+      maxResults: 100,
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+    return response.data.items ?? [];
   }
 
   async createEvent(accessToken: string, calendarId: string, eventData: any) {
-    try {
-      const oauth2Client = this.getOAuth2Client();
-      oauth2Client.setCredentials({ access_token: accessToken });
-
-      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-      const response = await calendar.events.insert({
-        calendarId,
-        requestBody: eventData,
-      });
-
-      return response.data;
-    } catch (error) {
-      this.logger.error('Error creating event:', error);
-      throw error;
-    }
+    const response = await this.getCalendarApi(accessToken).events.insert({
+      calendarId,
+      requestBody: eventData,
+    });
+    return response.data;
   }
 
   async deleteEvent(accessToken: string, calendarId: string, eventId: string) {
-    try {
-      const oauth2Client = this.getOAuth2Client();
-      oauth2Client.setCredentials({ access_token: accessToken });
-
-      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-      await calendar.events.delete({
-        calendarId,
-        eventId,
-      });
-
-      return { success: true };
-    } catch (error) {
-      this.logger.error('Error deleting event:', error);
-      throw error;
-    }
+    await this.getCalendarApi(accessToken).events.delete({ calendarId, eventId });
   }
 
   async refreshAccessToken(refreshToken: string) {
-    try {
-      const oauth2Client = this.getOAuth2Client();
-      oauth2Client.setCredentials({ refresh_token: refreshToken });
-
-      const { credentials } = await oauth2Client.refreshAccessToken();
-      return credentials;
-    } catch (error) {
-      this.logger.error('Error refreshing access token:', error);
-      throw error;
-    }
+    const { credentials } = await this.buildAuthClient({ refresh_token: refreshToken }).refreshAccessToken();
+    return credentials;
   }
 }

@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
-import { FirebaseModule } from '../firebase/firebase.module';
+import { CalendarController } from './calendar.controller';
+import { CalendarService } from './calendar.service';
 
 @Module({
-  imports: [FirebaseModule]
+  controllers: [CalendarController],
+  providers: [CalendarService],
+  exports: [CalendarService],
 })
 export class CalendarModule {}
