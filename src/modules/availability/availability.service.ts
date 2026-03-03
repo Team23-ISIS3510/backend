@@ -3,9 +3,9 @@ import { AvailabilityRepository } from './availability.repository';
 import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
 import { AvailabilityResponseDto } from '../availability/dto/availability-response.dto';
 import { Availability } from '../availability/entities/availability.entity';
-import { CalendarService } from '../calendar/calendar.service';
-import { SlotService } from '../availability/slot.service';
-import { Slot } from '../availability/slot.service';
+import { CalendarService } from '../../modules/calendar/calendar.service';
+import { SlotService } from '../../modules/availability/slot.service';
+import { Slot } from '../../modules/availability/slot.service';
 
 @Injectable()
 export class AvailabilityService {
@@ -37,19 +37,15 @@ export class AvailabilityService {
 
     try {
       if (tutorId && startDate && endDate) {
-        // Get availabilities for specific tutor in date range
         const start = new Date(startDate);
         const end = new Date(endDate);
-        const allTutorAvailabilities = await this.availabilityRepository.findByTutor(
+        const effectiveLimit = limit ?? 200;
+        availabilities = await this.availabilityRepository.findByTutorAndDateRange(
           tutorId,
-          200,
+          start,
+          end,
+          effectiveLimit,
         );
-
-        // Filter by date range
-        availabilities = allTutorAvailabilities.filter((availability) => {
-          const availStart = availability.startDateTime;
-          return availStart >= start && availStart <= end;
-        });
       } else if (tutorId) {
         // Get availabilities for specific tutor
         availabilities = await this.availabilityRepository.findByTutor(tutorId, limit);
@@ -72,6 +68,20 @@ export class AvailabilityService {
       return AvailabilityResponseDto.fromEntities(availabilities);
     } catch (error) {
       this.logger.error('Error fetching availabilities:', error);
+      throw error;
+    }
+  }
+
+  async getAvailabilitiesByIds(ids: string[]): Promise<AvailabilityResponseDto[]> {
+    if (!ids || ids.length === 0) {
+      return [];
+    }
+
+    try {
+      const entities = await this.availabilityRepository.findByIds(ids);
+      return AvailabilityResponseDto.fromEntities(entities);
+    } catch (error) {
+      this.logger.error('Error getting availabilities by IDs:', error);
       throw error;
     }
   }
@@ -181,7 +191,35 @@ export class AvailabilityService {
             timeMax,
           );
 
-          this.logger.log(`Found ${events.length} events in calendar ${calendar.summary || calendar.id}`);
+          this.logger.log(
+            `Found ${events.length} events in calendar ${calendar.summary || calendar.id}`,
+          );
+
+          // Preload existing availabilities for all events in this calendar to avoid one query per event
+          const calendarEventIds = events
+            .map((event) => event.id)
+            .filter((id): id is string => Boolean(id));
+
+          let existingCalendarEvents = new Set<string>();
+
+          if (calendarEventIds.length > 0) {
+            try {
+              const existingAvailabilities =
+                await this.availabilityRepository.findByIds(calendarEventIds);
+              existingAvailabilities.forEach((availability) => {
+                if (availability.googleEventId) {
+                  existingCalendarEvents.add(availability.googleEventId);
+                } else if (availability.id) {
+                  existingCalendarEvents.add(availability.id);
+                }
+              });
+            } catch (error) {
+              this.logger.warn(
+                `Error checking existing events for calendar ${calendar.id}:`,
+                error instanceof Error ? error.message : error,
+              );
+            }
+          }
 
           for (const event of events) {
             try {
@@ -208,8 +246,8 @@ export class AvailabilityService {
                 continue;
               }
 
-              // Check if event already exists
-              const existingAvailability = await this.availabilityRepository.findById(event.id);
+              const alreadyExists =
+                Boolean(event.id) && existingCalendarEvents.has(event.id);
 
               const availabilityData: Partial<Availability> = {
                 tutorId,
@@ -236,7 +274,7 @@ export class AvailabilityService {
                 availabilityData.course = event.summary;
               }
 
-              if (existingAvailability) {
+              if (alreadyExists) {
                 // Update existing
                 await this.availabilityRepository.save(event.id, availabilityData);
                 results.updated++;
@@ -384,15 +422,24 @@ export class AvailabilityService {
       }
 
       // Check which events already exist in Firebase
+      const eventIds = availabilityEvents
+        .map((event) => event.id)
+        .filter((id): id is string => Boolean(id));
+
       const existingEvents = new Set<string>();
-      for (const event of availabilityEvents) {
+
+      if (eventIds.length > 0) {
         try {
-          const exists = await this.availabilityRepository.exists(event.id);
-          if (exists) {
-            existingEvents.add(event.id);
-          }
+          const existingAvailabilities = await this.availabilityRepository.findByIds(eventIds);
+          existingAvailabilities.forEach((availability) => {
+            if (availability.googleEventId) {
+              existingEvents.add(availability.googleEventId);
+            } else if (availability.id) {
+              existingEvents.add(availability.id);
+            }
+          });
         } catch (error) {
-          this.logger.warn(`Error checking event ${event.id}:`, error.message);
+          this.logger.warn('Error checking existing events in bulk:', error instanceof Error ? error.message : error);
         }
       }
 
