@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
-import { FirebaseModule } from '../firebase/firebase.module';
+import { CalicoCalendarController } from './calico-calendar.controller';
+import { CalicoCalendarService } from './calico-calendar.service';
 
 @Module({
-  imports: [FirebaseModule],
+  controllers: [CalicoCalendarController],
+  providers: [CalicoCalendarService],
+  exports: [CalicoCalendarService],
 })
 export class CalicoCalendarModule {}
