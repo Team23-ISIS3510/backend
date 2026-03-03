@@ -406,7 +406,7 @@ export class SlotService {
 
       if (existingBooking) {
         this.logger.log(
-          `❌ Slot ${slot.id} already booked in real time by ${existingBooking.studentId}`,
+          ` Slot ${slot.id} already booked in real time by ${existingBooking.studentId}`,
         );
         return {
           available: false,
@@ -415,7 +415,7 @@ export class SlotService {
         };
       }
 
-      this.logger.log(`✅ Slot ${slot.id} available in real time`);
+      this.logger.log(` Slot ${slot.id} available in real time`);
       return {
         available: true,
         reason: 'Slot disponible',
