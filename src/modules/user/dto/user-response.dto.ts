@@ -2,6 +2,7 @@ import { User } from '../entities/user.entity';
 
 export class UserResponseDto {
   id!: string;
+  get uid(): string { return this.id; }
   email!: string;
   name!: string;
   phone!: string;

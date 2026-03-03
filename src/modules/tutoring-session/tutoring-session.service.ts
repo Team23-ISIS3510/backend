@@ -6,7 +6,7 @@ import { NotificationService } from '../notification/notification.service';
 import { UserService } from '../user/user.service';
 import { TutoringSession, TutoringSessionReview } from './entities/tutoring-session.entity';
 import { Slot } from '../availability/slot.service';
-import { CourseHelper } from 'src/common/helpers/course.helper';
+import { CourseHelper } from '../../common/helpers/course.helper';
 
 @Injectable()
 export class TutoringSessionService {
@@ -155,7 +155,7 @@ export class TutoringSessionService {
       } else if (slot.course && slot.course !== '') {
         extractedCourse = slot.course;
       } else if (slot.title) {
-        extractedCourse = CourseHelper.extractCourseFromTitle(slot.title);
+        extractedCourse = CourseHelper.extractCourseFromTitle(slot.title) ?? 'Tutoría General';
       }
 
       // tutorId in slot is the document ID (not email)
@@ -169,7 +169,7 @@ export class TutoringSessionService {
       let tutorEmail = slot.tutorEmail;
       if (!tutorEmail) {
         try {
-          const tutorUser = await this.userService.getUserById(tutorDocumentId);
+          const tutorUser = await this.userService.findById(tutorDocumentId);
           tutorEmail = tutorUser.email;
         } catch (error) {
           this.logger.warn(`Could not get tutor email for ${tutorDocumentId}:`, error);
@@ -792,7 +792,7 @@ export class TutoringSessionService {
       let tutorEmail = session.tutorEmail;
       if (!tutorEmail && session.tutorId) {
         try {
-          const tutorUser = await this.userService.getUserById(session.tutorId);
+          const tutorUser = await this.userService.findById(session.tutorId);
           tutorEmail = tutorUser.email;
         } catch (error) {
           this.logger.warn(`Could not get tutor email for ${session.tutorId}:`, error);
@@ -803,7 +803,7 @@ export class TutoringSessionService {
       let studentEmail = session.studentEmail;
       if (!studentEmail && session.studentId) {
         try {
-          const studentUser = await this.userService.getUserById(session.studentId);
+          const studentUser = await this.userService.findById(session.studentId);
           studentEmail = studentUser.email;
         } catch (error) {
           this.logger.warn(`Could not get student email for ${session.studentId}:`, error);
@@ -1051,7 +1051,7 @@ export class TutoringSessionService {
     // If tutorId is provided but tutorEmail is not, get email from UserService
     if (cleaned.tutorId && !cleaned.tutorEmail && !cleaned.tutorId.includes('@')) {
       try {
-        const tutorUser = await this.userService.getUserById(cleaned.tutorId);
+        const tutorUser = await this.userService.findById(cleaned.tutorId);
         if (tutorUser) {
           cleaned.tutorEmail = tutorUser.email;
         }
@@ -1072,7 +1072,7 @@ export class TutoringSessionService {
     }
     if (cleaned.studentId && !cleaned.studentEmail && !cleaned.studentId.includes('@')) {
       try {
-        const studentUser = await this.userService.getUserById(cleaned.studentId);
+        const studentUser = await this.userService.findById(cleaned.studentId);
         if (studentUser) {
           cleaned.studentEmail = studentUser.email;
         }
@@ -1146,12 +1146,12 @@ export class TutoringSessionService {
     try {
       if (!tutorIdOrEmail) return null;
 
-      let user = null;
+      let user: import('../user/dto/user-response.dto').UserResponseDto | null = null;
 
       // Try by document ID first (preferred - id is different from email)
       if (!tutorIdOrEmail.includes('@')) {
         try {
-          user = await this.userService.getUserById(tutorIdOrEmail);
+          user = await this.userService.findById(tutorIdOrEmail);
         } catch (error) {
           // If not found by ID, try by email
           if (tutorIdOrEmail.includes('@')) {

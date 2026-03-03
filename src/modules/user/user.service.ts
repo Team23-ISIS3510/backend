@@ -21,6 +21,13 @@ export class UserService {
     return UserResponseDto.fromEntity(user);
   }
 
+
+  async getUserByEmail(email: string): Promise<UserResponseDto | null> {
+    const user = await this.userRepository.findByEmail(email);
+    if (!user) return null;
+    return UserResponseDto.fromEntity(user);
+  }
+
   async update(id: string, dto: UpdateUserDto): Promise<UserResponseDto> {
     const user = await this.userRepository.update(id, dto);
     return UserResponseDto.fromEntity(user);
