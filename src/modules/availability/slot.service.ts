@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AvailabilityResponseDto } from '../availability/dto/availability-response.dto';
 import { TutoringSessionService } from '../tutoring-session/tutoring-session.service';
 import { TutoringSession } from '../tutoring-session/entities/tutoring-session.entity';
-import { CourseHelper } from 'src/common/helpers/course.helper'; // TODO: look if it works when they impelment it 
+import { CourseHelper } from '../../common/helpers/course.helper'; // TODO: look if it works when they impelment it 
 
 export interface Slot {
   id: string;
