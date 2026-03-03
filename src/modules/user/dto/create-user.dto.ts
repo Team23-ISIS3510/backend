@@ -2,16 +2,16 @@ import { IsString, IsEmail, IsBoolean, IsArray, IsOptional } from 'class-validat
 
 export class CreateUserDto {
   @IsEmail()
-  email: string;
+  email!: string;
 
   @IsString()
-  name: string;
+  name!: string;
 
   @IsString()
-  phone: string;
+  phone!: string;
 
   @IsBoolean()
-  isTutor: boolean;
+  isTutor!: boolean;
 
   @IsArray()
   @IsString({ each: true })
