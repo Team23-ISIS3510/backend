@@ -98,8 +98,8 @@ export class CoursesController {
         credits: 3,
         faculty: 'Engineering',
         prerequisites: ['ISIS2603'],
-      }
-    }
+      },
+    },
   })
   @Post()
   async createCourse(@Body() courseData: any) {
