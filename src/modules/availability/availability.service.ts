@@ -247,14 +247,14 @@ export class AvailabilityService {
               }
 
               const alreadyExists =
-                Boolean(event.id) && existingCalendarEvents.has(event.id);
+                Boolean(event.id) && existingCalendarEvents.has(event.id as string);
 
               const availabilityData: Partial<Availability> = {
                 tutorId,
                 title: event.summary || 'Sin título',
                 startDateTime,
                 endDateTime,
-                googleEventId: event.id,
+                googleEventId: event.id ?? undefined,
                 recurring: !!event.recurrence && event.recurrence.length > 0,
                 sourceCalendarId: calendar.id,
                 sourceCalendarName: calendar.summary || calendar.id,
@@ -276,19 +276,19 @@ export class AvailabilityService {
 
               if (alreadyExists) {
                 // Update existing
-                await this.availabilityRepository.save(event.id, availabilityData);
+                await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
                 results.updated++;
                 this.logger.debug(`Updated availability: ${event.id}`);
               } else {
                 // Create new
-                await this.availabilityRepository.save(event.id, availabilityData);
+                await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
                 results.created++;
                 this.logger.debug(`Created availability: ${event.id}`);
               }
             } catch (error) {
               this.logger.error(`Error processing event ${event.id}:`, error);
               results.errors.push({
-                eventId: event.id,
+                eventId: event.id ?? undefined,
                 error: error.message || 'Error procesando evento',
               });
             }
@@ -367,7 +367,7 @@ export class AvailabilityService {
       const calendars = await this.calendarService.listCalendars(accessToken);
 
       // Find specific calendar by name if provided (e.g., "Disponibilidad")
-      let targetCalendar = null;
+      let targetCalendar: any = null;
       if (calendarName) {
         targetCalendar = calendars.find(
           (cal) => cal.summary?.toLowerCase() === calendarName.toLowerCase() || calendarName.toLowerCase().includes(cal.summary?.toLowerCase() || '') || cal.summary?.toLowerCase()?.includes(calendarName.toLowerCase()),
@@ -446,7 +446,7 @@ export class AvailabilityService {
       this.logger.log(`${existingEvents.size} events already exist in Firebase`);
 
       // Filter only new events
-      const newEvents = availabilityEvents.filter((event) => !existingEvents.has(event.id));
+      const newEvents = availabilityEvents.filter((event) => !existingEvents.has(event.id as string));
 
       if (newEvents.length === 0) {
         return {
@@ -503,7 +503,7 @@ export class AvailabilityService {
       try {
         const calendars = await this.calendarService.listCalendars(accessToken);
         const primary = calendars.find((cal) => cal.primary) || calendars[0];
-        targetCalendarId = primary?.id;
+        targetCalendarId = primary?.id ?? undefined;
         if (!targetCalendarId) {
           throw new Error('No se pudo determinar el calendario a usar');
         }
@@ -545,7 +545,7 @@ export class AvailabilityService {
           title: event.summary || 'Sin título',
           startDateTime,
           endDateTime,
-          googleEventId: event.id,
+          googleEventId: event.id ?? undefined,
           recurring: !!event.recurrence && event.recurrence.length > 0,
           sourceCalendarId: targetCalendarId,
         };
@@ -569,19 +569,19 @@ export class AvailabilityService {
 
         if (existingAvailability) {
           // Update existing
-          await this.availabilityRepository.save(event.id, availabilityData);
+          await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
           results.updated++;
           this.logger.debug(`Updated availability: ${event.id}`);
         } else {
           // Create new
-          await this.availabilityRepository.save(event.id, availabilityData);
+          await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
           results.created++;
           this.logger.debug(`Created availability: ${event.id}`);
         }
       } catch (error) {
         this.logger.error(`Error processing event ${event.id}:`, error);
         results.errors.push({
-          eventId: event.id,
+          eventId: event.id ?? undefined,
           error: error.message || 'Error procesando evento',
         });
       }
@@ -622,7 +622,7 @@ export class AvailabilityService {
         const disponibilidadCalendar = calendars.find(
           (cal) => cal.summary?.toLowerCase() === 'disponibilidad',
         );
-        calendarId = disponibilidadCalendar?.id || calendars.find((cal) => cal.primary)?.id || calendars[0]?.id;
+        calendarId = disponibilidadCalendar?.id ?? calendars.find((cal) => cal.primary)?.id ?? calendars[0]?.id ?? undefined;
         if (!calendarId) {
           throw new Error('No se pudo determinar el calendario a usar');
         }
@@ -655,7 +655,7 @@ export class AvailabilityService {
         title: eventData.title,
         startDateTime,
         endDateTime,
-        googleEventId: createdEvent.id,
+        googleEventId: createdEvent.id ?? undefined,
         recurring: false,
         sourceCalendarId: calendarId,
         course: eventData.course || eventData.title,
@@ -669,7 +669,7 @@ export class AvailabilityService {
         availabilityData.eventLink = createdEvent.htmlLink;
       }
 
-      const availabilityId = await this.availabilityRepository.save(createdEvent.id, availabilityData);
+      const availabilityId = await this.availabilityRepository.save(createdEvent.id ?? undefined, availabilityData);
 
       this.logger.log(`Created availability event: ${createdEvent.id}`);
 
@@ -700,7 +700,7 @@ export class AvailabilityService {
           targetCalendarId = availability.sourceCalendarId;
         } else {
           const calendars = await this.calendarService.listCalendars(accessToken);
-          targetCalendarId = calendars.find((cal) => cal.primary)?.id || calendars[0]?.id;
+          targetCalendarId = calendars.find((cal) => cal.primary)?.id ?? calendars[0]?.id ?? undefined;
         }
       }
 

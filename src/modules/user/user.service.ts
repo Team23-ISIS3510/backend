@@ -15,9 +15,16 @@ export class UserService {
     return UserResponseDto.fromEntity(user);
   }
 
-  async findById(id: string): Promise<UserResponseDto> {
+  async getUserById(id: string): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(id);
     if (!user) throw new NotFoundException('User not found');
+    return UserResponseDto.fromEntity(user);
+  }
+
+
+  async getUserByEmail(email: string): Promise<UserResponseDto | null> {
+    const user = await this.userRepository.findByEmail(email);
+    if (!user) return null;
     return UserResponseDto.fromEntity(user);
   }
 
