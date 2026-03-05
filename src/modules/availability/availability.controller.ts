@@ -10,7 +10,7 @@ import {
   GenerateJointSlotsDto,
   GenerateJointSlotsWeekDto,
   GetJointAvailabilityStatsDto,
-} from './dto/joint-availability.dto';
+} from '../availability/dto/joint-availability.dto';
 import {
   GenerateSlotsDto,
   GenerateSlotsFromAvailabilitiesDto,
@@ -19,7 +19,7 @@ import {
   GetConsecutiveSlotsDto,
 } from '../availability/dto/slot.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBody } from '@nestjs/swagger';
-import { Request } from 'express';
+import type { Request } from 'express';
 
 @ApiTags('Availability')
 @Controller('availability')
@@ -295,7 +295,6 @@ export class AvailabilityController {
 
       return {
         success: true,
-        message: result.message,
         ...result,
       };
     } catch (error) {
@@ -728,14 +727,10 @@ export class AvailabilityController {
 
       this.logger.log(`Generating slots from ${dto.availabilityIds.length} availabilities`);
 
-      // Get availabilities by IDs
-      const availabilityPromises = dto.availabilityIds.map((id) =>
-        this.availabilityService.getAvailabilityById(id),
+      // Get availabilities by IDs in a batched, optimized way
+      const availabilities = await this.availabilityService.getAvailabilitiesByIds(
+        dto.availabilityIds,
       );
-
-      const availabilities = (await Promise.all(availabilityPromises)).filter(
-        (a) => a !== null,
-      ) as AvailabilityResponseDto[];
 
       if (availabilities.length === 0) {
         throw new HttpException(

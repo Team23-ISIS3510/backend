@@ -6,7 +6,7 @@ import { NotificationService } from '../notification/notification.service';
 import { UserService } from '../user/user.service';
 import { TutoringSession, TutoringSessionReview } from './entities/tutoring-session.entity';
 import { Slot } from '../availability/slot.service';
-import { CourseHelper } from 'src/common/helpers/course.helper';
+import { CourseHelper } from '../../common/helpers/course.helper';
 
 @Injectable()
 export class TutoringSessionService {
@@ -155,7 +155,7 @@ export class TutoringSessionService {
       } else if (slot.course && slot.course !== '') {
         extractedCourse = slot.course;
       } else if (slot.title) {
-        extractedCourse = CourseHelper.extractCourseFromTitle(slot.title);
+        extractedCourse = CourseHelper.extractCourseFromTitle(slot.title) ?? 'Tutoría General';
       }
 
       // tutorId in slot is the document ID (not email)

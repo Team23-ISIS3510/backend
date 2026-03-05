@@ -3,9 +3,9 @@ import { AvailabilityRepository } from './availability.repository';
 import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
 import { AvailabilityResponseDto } from '../availability/dto/availability-response.dto';
 import { Availability } from '../availability/entities/availability.entity';
-import { CalendarService } from '../calendar/calendar.service';
-import { SlotService } from '../availability/slot.service';
-import { Slot } from '../availability/slot.service';
+import { CalendarService } from '../../modules/calendar/calendar.service';
+import { SlotService } from '../../modules/availability/slot.service';
+import { Slot } from '../../modules/availability/slot.service';
 
 @Injectable()
 export class AvailabilityService {
@@ -37,19 +37,15 @@ export class AvailabilityService {
 
     try {
       if (tutorId && startDate && endDate) {
-        // Get availabilities for specific tutor in date range
         const start = new Date(startDate);
         const end = new Date(endDate);
-        const allTutorAvailabilities = await this.availabilityRepository.findByTutor(
+        const effectiveLimit = limit ?? 200;
+        availabilities = await this.availabilityRepository.findByTutorAndDateRange(
           tutorId,
-          200,
+          start,
+          end,
+          effectiveLimit,
         );
-
-        // Filter by date range
-        availabilities = allTutorAvailabilities.filter((availability) => {
-          const availStart = availability.startDateTime;
-          return availStart >= start && availStart <= end;
-        });
       } else if (tutorId) {
         // Get availabilities for specific tutor
         availabilities = await this.availabilityRepository.findByTutor(tutorId, limit);
@@ -72,6 +68,20 @@ export class AvailabilityService {
       return AvailabilityResponseDto.fromEntities(availabilities);
     } catch (error) {
       this.logger.error('Error fetching availabilities:', error);
+      throw error;
+    }
+  }
+
+  async getAvailabilitiesByIds(ids: string[]): Promise<AvailabilityResponseDto[]> {
+    if (!ids || ids.length === 0) {
+      return [];
+    }
+
+    try {
+      const entities = await this.availabilityRepository.findByIds(ids);
+      return AvailabilityResponseDto.fromEntities(entities);
+    } catch (error) {
+      this.logger.error('Error getting availabilities by IDs:', error);
       throw error;
     }
   }
@@ -181,7 +191,35 @@ export class AvailabilityService {
             timeMax,
           );
 
-          this.logger.log(`Found ${events.length} events in calendar ${calendar.summary || calendar.id}`);
+          this.logger.log(
+            `Found ${events.length} events in calendar ${calendar.summary || calendar.id}`,
+          );
+
+          // Preload existing availabilities for all events in this calendar to avoid one query per event
+          const calendarEventIds = events
+            .map((event) => event.id)
+            .filter((id): id is string => Boolean(id));
+
+          let existingCalendarEvents = new Set<string>();
+
+          if (calendarEventIds.length > 0) {
+            try {
+              const existingAvailabilities =
+                await this.availabilityRepository.findByIds(calendarEventIds);
+              existingAvailabilities.forEach((availability) => {
+                if (availability.googleEventId) {
+                  existingCalendarEvents.add(availability.googleEventId);
+                } else if (availability.id) {
+                  existingCalendarEvents.add(availability.id);
+                }
+              });
+            } catch (error) {
+              this.logger.warn(
+                `Error checking existing events for calendar ${calendar.id}:`,
+                error instanceof Error ? error.message : error,
+              );
+            }
+          }
 
           for (const event of events) {
             try {
@@ -208,15 +246,15 @@ export class AvailabilityService {
                 continue;
               }
 
-              // Check if event already exists
-              const existingAvailability = await this.availabilityRepository.findById(event.id);
+              const alreadyExists =
+                Boolean(event.id) && existingCalendarEvents.has(event.id as string);
 
               const availabilityData: Partial<Availability> = {
                 tutorId,
                 title: event.summary || 'Sin título',
                 startDateTime,
                 endDateTime,
-                googleEventId: event.id,
+                googleEventId: event.id ?? undefined,
                 recurring: !!event.recurrence && event.recurrence.length > 0,
                 sourceCalendarId: calendar.id,
                 sourceCalendarName: calendar.summary || calendar.id,
@@ -236,21 +274,21 @@ export class AvailabilityService {
                 availabilityData.course = event.summary;
               }
 
-              if (existingAvailability) {
+              if (alreadyExists) {
                 // Update existing
-                await this.availabilityRepository.save(event.id, availabilityData);
+                await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
                 results.updated++;
                 this.logger.debug(`Updated availability: ${event.id}`);
               } else {
                 // Create new
-                await this.availabilityRepository.save(event.id, availabilityData);
+                await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
                 results.created++;
                 this.logger.debug(`Created availability: ${event.id}`);
               }
             } catch (error) {
               this.logger.error(`Error processing event ${event.id}:`, error);
               results.errors.push({
-                eventId: event.id,
+                eventId: event.id ?? undefined,
                 error: error.message || 'Error procesando evento',
               });
             }
@@ -329,7 +367,7 @@ export class AvailabilityService {
       const calendars = await this.calendarService.listCalendars(accessToken);
 
       // Find specific calendar by name if provided (e.g., "Disponibilidad")
-      let targetCalendar = null;
+      let targetCalendar: any = null;
       if (calendarName) {
         targetCalendar = calendars.find(
           (cal) => cal.summary?.toLowerCase() === calendarName.toLowerCase() || calendarName.toLowerCase().includes(cal.summary?.toLowerCase() || '') || cal.summary?.toLowerCase()?.includes(calendarName.toLowerCase()),
@@ -384,22 +422,31 @@ export class AvailabilityService {
       }
 
       // Check which events already exist in Firebase
+      const eventIds = availabilityEvents
+        .map((event) => event.id)
+        .filter((id): id is string => Boolean(id));
+
       const existingEvents = new Set<string>();
-      for (const event of availabilityEvents) {
+
+      if (eventIds.length > 0) {
         try {
-          const exists = await this.availabilityRepository.exists(event.id);
-          if (exists) {
-            existingEvents.add(event.id);
-          }
+          const existingAvailabilities = await this.availabilityRepository.findByIds(eventIds);
+          existingAvailabilities.forEach((availability) => {
+            if (availability.googleEventId) {
+              existingEvents.add(availability.googleEventId);
+            } else if (availability.id) {
+              existingEvents.add(availability.id);
+            }
+          });
         } catch (error) {
-          this.logger.warn(`Error checking event ${event.id}:`, error.message);
+          this.logger.warn('Error checking existing events in bulk:', error instanceof Error ? error.message : error);
         }
       }
 
       this.logger.log(`${existingEvents.size} events already exist in Firebase`);
 
       // Filter only new events
-      const newEvents = availabilityEvents.filter((event) => !existingEvents.has(event.id));
+      const newEvents = availabilityEvents.filter((event) => !existingEvents.has(event.id as string));
 
       if (newEvents.length === 0) {
         return {
@@ -456,7 +503,7 @@ export class AvailabilityService {
       try {
         const calendars = await this.calendarService.listCalendars(accessToken);
         const primary = calendars.find((cal) => cal.primary) || calendars[0];
-        targetCalendarId = primary?.id;
+        targetCalendarId = primary?.id ?? undefined;
         if (!targetCalendarId) {
           throw new Error('No se pudo determinar el calendario a usar');
         }
@@ -498,7 +545,7 @@ export class AvailabilityService {
           title: event.summary || 'Sin título',
           startDateTime,
           endDateTime,
-          googleEventId: event.id,
+          googleEventId: event.id ?? undefined,
           recurring: !!event.recurrence && event.recurrence.length > 0,
           sourceCalendarId: targetCalendarId,
         };
@@ -522,19 +569,19 @@ export class AvailabilityService {
 
         if (existingAvailability) {
           // Update existing
-          await this.availabilityRepository.save(event.id, availabilityData);
+          await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
           results.updated++;
           this.logger.debug(`Updated availability: ${event.id}`);
         } else {
           // Create new
-          await this.availabilityRepository.save(event.id, availabilityData);
+          await this.availabilityRepository.save(event.id ?? undefined, availabilityData);
           results.created++;
           this.logger.debug(`Created availability: ${event.id}`);
         }
       } catch (error) {
         this.logger.error(`Error processing event ${event.id}:`, error);
         results.errors.push({
-          eventId: event.id,
+          eventId: event.id ?? undefined,
           error: error.message || 'Error procesando evento',
         });
       }
@@ -575,7 +622,7 @@ export class AvailabilityService {
         const disponibilidadCalendar = calendars.find(
           (cal) => cal.summary?.toLowerCase() === 'disponibilidad',
         );
-        calendarId = disponibilidadCalendar?.id || calendars.find((cal) => cal.primary)?.id || calendars[0]?.id;
+        calendarId = disponibilidadCalendar?.id ?? calendars.find((cal) => cal.primary)?.id ?? calendars[0]?.id ?? undefined;
         if (!calendarId) {
           throw new Error('No se pudo determinar el calendario a usar');
         }
@@ -608,7 +655,7 @@ export class AvailabilityService {
         title: eventData.title,
         startDateTime,
         endDateTime,
-        googleEventId: createdEvent.id,
+        googleEventId: createdEvent.id ?? undefined,
         recurring: false,
         sourceCalendarId: calendarId,
         course: eventData.course || eventData.title,
@@ -622,7 +669,7 @@ export class AvailabilityService {
         availabilityData.eventLink = createdEvent.htmlLink;
       }
 
-      const availabilityId = await this.availabilityRepository.save(createdEvent.id, availabilityData);
+      const availabilityId = await this.availabilityRepository.save(createdEvent.id ?? undefined, availabilityData);
 
       this.logger.log(`Created availability event: ${createdEvent.id}`);
 
@@ -653,7 +700,7 @@ export class AvailabilityService {
           targetCalendarId = availability.sourceCalendarId;
         } else {
           const calendars = await this.calendarService.listCalendars(accessToken);
-          targetCalendarId = calendars.find((cal) => cal.primary)?.id || calendars[0]?.id;
+          targetCalendarId = calendars.find((cal) => cal.primary)?.id ?? calendars[0]?.id ?? undefined;
         }
       }
 

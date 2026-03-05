@@ -35,6 +35,7 @@ export class SlotBookingRepository {
       }
 
       const data = docSnap.data();
+      if (!data) return null;
       return {
         id: docSnap.id,
         parentAvailabilityId: data.parentAvailabilityId,
