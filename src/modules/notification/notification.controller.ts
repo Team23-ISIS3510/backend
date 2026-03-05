@@ -138,16 +138,13 @@ export class NotificationController {
     schema: {
       example: {
         recipientId: 'string',
-        type: 'string',
         title: 'string',
         message: 'string',
-        relatedEntityId: 'string (optional)',
-        relatedEntityType: 'string (optional)',
       },
     },
   })
   @Post()
-  async createNotification(@Body() notificationData: CreateNotificationDto) {
+  async createNotification(@Body() notificationData: Partial<Notification>) {
     try {
       const notification =
         await this.notificationService.createNotification(notificationData);
