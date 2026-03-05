@@ -2,25 +2,6 @@
   "name": "monitorias-backend",
   "version": "0.1.0",
   "private": true,
-  "dependencies": {
-    "@nestjs/axios": "^4.0.1",
-    "@nestjs/common": "^10.3.0",
-    "@nestjs/config": "^3.1.1",
-    "@nestjs/core": "^10.3.0",
-    "@nestjs/mapped-types": "^2.1.0",
-    "@nestjs/platform-express": "^10.3.0",
-    "@nestjs/swagger": "^7.4.2",
-    "axios": "^1.13.2",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.0",
-    "cookie-parser": "^1.4.7",
-    "dotenv": "^17.2.1",
-    "firebase-admin": "^13.4.0",
-    "googleapis": "^150.0.1",
-    "pino": "^10.0.0",
-    "reflect-metadata": "^0.1.13",
-    "rxjs": "^7.8.1"
-  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -33,7 +14,11 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "firebase-init": "node scripts/firebase-init-data.js",
+    "test-gdrive": "node scripts/test-google-drive.js",
+    "setup-admin-oauth": "node scripts/setup-admin-oauth.js",
+    "reset-seed": "node scripts/reset-seed-firebase.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -44,11 +29,6 @@
     "firebase-admin": "^13.7.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
-    "test:e2e": "jest --config ./test/jest-e2e.json",
-    "firebase-init": "node scripts/firebase-init-data.js",
-    "test-gdrive": "node scripts/test-google-drive.js",
-    "setup-admin-oauth": "node scripts/setup-admin-oauth.js",
-    "reset-seed": "node scripts/reset-seed-firebase.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",

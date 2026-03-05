@@ -119,4 +119,31 @@ export class PaymentRepository {
       throw error;
     }
   }
+
+  async findAll(limit: number = 100): Promise<Payment[]> {
+    try {
+      const snapshot = await this.firebaseService
+        .getFirestore()
+        .collection(this.COLLECTION)
+        .orderBy('createdAt', 'desc')
+        .limit(limit)
+        .get();
+
+      const payments: Payment[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        payments.push({
+          id: doc.id,
+          ...data,
+          createdAt: this.firebaseService.parseDate(data.createdAt),
+          updatedAt: this.firebaseService.parseDate(data.updatedAt),
+        } as Payment);
+      });
+
+      return payments;
+    } catch (error) {
+      this.logger.error('Error finding all payments:', error);
+      throw error;
+    }
+  }
 }
