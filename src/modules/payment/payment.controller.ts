@@ -21,6 +21,20 @@ export class PaymentController {
 
   constructor(private readonly paymentService: PaymentService) {}
 
+  @Get()
+  async getAllPayments(@Query('limit') limit?: string) {
+    try {
+      const limitNum = limit ? Number.parseInt(limit, 10) : 100;
+      const payments = await this.paymentService.getAllPayments(limitNum);
+      return { success: true, payments, count: payments.length };
+    } catch (error) {
+      this.logger.error('Error getting all payments:', error);
+      const message =
+        error instanceof Error ? error.message : 'Error getting all payments';
+      throw new HttpException(message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   @Get(':id')
   async getPaymentById(@Param('id') id: string) {
     try {
