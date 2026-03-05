@@ -1,0 +1,13 @@
+{
+  "eslint.enable": true,
+  "eslint.validate": [
+    "javascript",
+    "typescript"
+  ],
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.problems.shortenToSingleLine": true,
+  "problems.showCurrentInStatus": true,
+  "typescript.tsdk": "node_modules/typescript/lib"
+}
