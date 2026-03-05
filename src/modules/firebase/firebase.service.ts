@@ -25,12 +25,18 @@ export class FirebaseService implements OnModuleInit {
         if (!projectId || !clientEmail || !privateKey) {
           if (saKeyJson) {
             try {
-              const sa = typeof saKeyJson === 'string' ? JSON.parse(saKeyJson) : saKeyJson;
+              const sa =
+                typeof saKeyJson === 'string'
+                  ? JSON.parse(saKeyJson)
+                  : saKeyJson;
               projectId = projectId || sa.project_id || sa.projectId;
               clientEmail = clientEmail || sa.client_email;
               privateKey = privateKey || sa.private_key;
             } catch (err) {
-              this.logger.warn('Failed parsing GOOGLE_SERVICE_ACCOUNT_KEY JSON:', err.message || err);
+              this.logger.warn(
+                'Failed parsing GOOGLE_SERVICE_ACCOUNT_KEY JSON:',
+                err.message || err,
+              );
             }
           }
         }
@@ -41,7 +47,9 @@ export class FirebaseService implements OnModuleInit {
         }
 
         // Check for GOOGLE_SERVICE_ACCOUNT_KEY JSON
-        const googleServiceAccountKey = this.configService.get('GOOGLE_SERVICE_ACCOUNT_KEY');
+        const googleServiceAccountKey = this.configService.get(
+          'GOOGLE_SERVICE_ACCOUNT_KEY',
+        );
         if (googleServiceAccountKey) {
           try {
             const parsed = JSON.parse(googleServiceAccountKey);
@@ -49,7 +57,9 @@ export class FirebaseService implements OnModuleInit {
             if (parsed.project_id) projectId = parsed.project_id;
             if (parsed.client_email) clientEmail = parsed.client_email;
             if (parsed.private_key) privateKey = parsed.private_key;
-            this.logger.log('Loaded Firebase credentials from GOOGLE_SERVICE_ACCOUNT_KEY');
+            this.logger.log(
+              'Loaded Firebase credentials from GOOGLE_SERVICE_ACCOUNT_KEY',
+            );
           } catch (e) {
             this.logger.warn('Failed to parse GOOGLE_SERVICE_ACCOUNT_KEY', e);
           }
@@ -60,14 +70,14 @@ export class FirebaseService implements OnModuleInit {
           // If the key is wrapped in quotes, try to parse it as a JSON string to handle escapes correctly
           if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
             try {
-               // This handles "line1\nline2" correctly
-               privateKey = JSON.parse(privateKey);
+              // This handles "line1\nline2" correctly
+              privateKey = JSON.parse(privateKey);
             } catch (e) {
-               // Fallback if it's not valid JSON string
-               privateKey = privateKey.slice(1, -1).replace(/\\n/g, '\n');
+              // Fallback if it's not valid JSON string
+              privateKey = privateKey.slice(1, -1).replace(/\\n/g, '\n');
             }
           } else {
-             privateKey = privateKey.replace(/\\n/g, '\n');
+            privateKey = privateKey.replace(/\\n/g, '\n');
           }
         }
 
