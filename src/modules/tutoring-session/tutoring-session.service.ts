@@ -1146,7 +1146,7 @@ export class TutoringSessionService {
     try {
       if (!tutorIdOrEmail) return null;
 
-      let user: import('../user/dto/user-response.dto').UserResponseDto | null = null;
+      let user = null;
 
       // Try by document ID first (preferred - id is different from email)
       if (!tutorIdOrEmail.includes('@')) {
