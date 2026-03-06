@@ -1146,7 +1146,7 @@ export class TutoringSessionService {
     try {
       if (!tutorIdOrEmail) return null;
 
-      let user = null;
+      let user: any = null;
 
       // Try by document ID first (preferred - id is different from email)
       if (!tutorIdOrEmail.includes('@')) {

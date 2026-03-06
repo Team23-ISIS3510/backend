@@ -12,7 +12,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { NotificationService } from './notification.service';
-import type { CreateNotificationDto } from './notification.service';
 import {
   ApiTags,
   ApiOperation,

@@ -46,6 +46,10 @@ export class PaymentService {
     return this.paymentRepository.findByStudent(studentId, limit);
   }
 
+  async getAllPayments(limit: number = 100): Promise<Payment[]> {
+    return this.paymentRepository.findAll(limit);
+  }
+
   async handleWompiWebhook(event: any): Promise<void> {
     const { data, signature, timestamp } = event ?? {};
     const transaction = data?.transaction;
