@@ -6,6 +6,7 @@ import { FirebaseModule } from './modules/firebase/firebase.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { UserModule } from './modules/user/user.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -14,9 +15,11 @@ import { NotificationModule } from './modules/notification/notification.module';
     PaymentModule,
     UserModule,
     NotificationModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}
+
 
