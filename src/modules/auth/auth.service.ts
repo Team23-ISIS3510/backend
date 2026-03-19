@@ -14,11 +14,13 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { UserResponseDto } from '../user/dto/user-response.dto';
+import { Logger } from '@nestjs/common';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 @Injectable()
 export class AuthService {
   private readonly identityUrl = 'https://identitytoolkit.googleapis.com/v1/accounts';
+
 
   constructor(
     private readonly firebase: FirebaseService,
@@ -91,7 +93,7 @@ export class AuthService {
     const factory = firebaseMessages[code];
     if (factory) return factory();
 
-    this.logger.error('Unhandled Firebase error', err);
+    Logger.error('Unhandled Firebase error', err);
     return new InternalServerErrorException(
       'Something went wrong. Please try again later.',
     );
