@@ -4,10 +4,9 @@ import {
   ConflictException,
   BadRequestException,
   InternalServerErrorException,
-  Logger,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { FirebaseService } from '../firebase/firebase.service';
 import { UserService } from '../user/user.service';
@@ -19,21 +18,14 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
   private readonly identityUrl = 'https://identitytoolkit.googleapis.com/v1/accounts';
 
   constructor(
     private readonly firebase: FirebaseService,
     private readonly userService: UserService,
     private readonly httpService: HttpService,
-    private readonly config: ConfigService,
+    private readonly configService: ConfigService,
   ) {}
-
-  private get apiKey(): string {
-    return this.config.getOrThrow<string>('NEXT_PUBLIC_FIREBASE_API_KEY');
-  }
-
-  // ── Token verification (used by guard) ──────────────────────────────────────
 
   async verifyToken(token: string): Promise<DecodedIdToken> {
     try {
@@ -42,8 +34,6 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired token');
     }
   }
-
-  // ── Register (email/password) ────────────────────────────────────────────────
 
   async register(dto: RegisterDto): Promise<UserResponseDto> {
     try {
@@ -107,28 +97,39 @@ export class AuthService {
     );
   }
 
-  // ── Login (email/password) ───────────────────────────────────────────────────
+  private get firebaseApiKey(): string {
+    const apiKey = this.configService.get<string>('FIREBASE_API_KEY');
+    if (!apiKey) {
+      throw new InternalServerErrorException('Missing FIREBASE_API_KEY');
+    }
+    return apiKey;
+  }
 
   async login(dto: LoginDto): Promise<AuthResponseDto> {
     try {
       const { data } = await firstValueFrom(
-        this.httpService.post<{ idToken: string; refreshToken: string; expiresIn: string }>(
-          `${this.identityUrl}:signInWithPassword?key=${this.apiKey}`,
-          { email: dto.email, password: dto.password, returnSecureToken: true },
+        this.httpService.post<AuthResponseDto>(
+          `${this.identityUrl}:signInWithPassword?key=${this.firebaseApiKey}`,
+          {
+            email: dto.email,
+            password: dto.password,
+            returnSecureToken: true,
+          },
         ),
       );
-      return { idToken: data.idToken, refreshToken: data.refreshToken, expiresIn: data.expiresIn };
-    } catch (err: any) {
-      const message = err?.response?.data?.error?.message ?? '';
-      if (message.includes('EMAIL_NOT_FOUND') || message.includes('INVALID_PASSWORD') || message.includes('INVALID_LOGIN_CREDENTIALS')) {
+      return data;
+    } catch (error: any) {
+      const message = error?.response?.data?.error?.message ?? '';
+      if (
+        message.includes('EMAIL_NOT_FOUND') ||
+        message.includes('INVALID_PASSWORD') ||
+        message.includes('INVALID_LOGIN_CREDENTIALS')
+      ) {
         throw new UnauthorizedException('Invalid email or password');
       }
-      this.logger.error('Login error', err);
       throw new InternalServerErrorException('Login failed');
     }
   }
-
-  // ── Change password (requires valid token → uid from guard) ─────────────────
 
   async changePassword(uid: string, newPassword: string): Promise<void> {
     try {
@@ -138,25 +139,31 @@ export class AuthService {
     }
   }
 
-  // ── Google sign-in (client sends Firebase ID token after Google auth) ────────
-
   async googleSignIn(idToken: string): Promise<{ user: UserResponseDto; isNew: boolean }> {
+    return this.resolveUserFromIdToken(idToken);
+  }
+
+  private async resolveUserFromIdToken(
+    idToken: string,
+  ): Promise<{ user: UserResponseDto; isNew: boolean }> {
     const decoded = await this.verifyToken(idToken);
-
-    let user = await this.userService.findByIdOrNull(decoded.uid);
-    let isNew = false;
-
-    if (!user) {
-      // Auto-register with info from Google token
-      user = await this.userService.create(decoded.uid, {
-        email: decoded.email!,
-        name: decoded.name ?? decoded.email!,
-        phone: '',
-        isTutor: false,
-      });
-      isNew = true;
+    const existingUser = await this.userService.findByIdOrNull(decoded.uid);
+    if (existingUser) {
+      return { user: existingUser, isNew: false };
     }
 
-    return { user, isNew };
+    const email = decoded.email;
+    if (!email) {
+      throw new UnauthorizedException('Authenticated token does not include an email');
+    }
+
+    const createdUser = await this.userService.create(decoded.uid, {
+      email,
+      name: decoded.name ?? email,
+      phone: '',
+      isTutor: false,
+    });
+
+    return { user: createdUser, isNew: true };
   }
 }
