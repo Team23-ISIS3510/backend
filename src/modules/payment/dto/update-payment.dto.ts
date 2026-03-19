@@ -11,7 +11,7 @@ export class UpdatePaymentDto {
   })
   @IsIn(['pending', 'paid', 'failed', 'refunded'])
   @IsOptional()
-  status?: PaymentStatus;
+  status?: 'pending' | 'paid' | 'failed' | 'refunded';
 
   @ApiProperty({ example: 'wompi_abc123', required: false, description: 'Wompi transaction ID from the webhook' })
   @IsString()
