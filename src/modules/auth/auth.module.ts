@@ -13,4 +13,3 @@ import { UserModule } from '../user/user.module';
   exports: [AuthService, FirebaseAuthGuard],
 })
 export class AuthModule {}
-
