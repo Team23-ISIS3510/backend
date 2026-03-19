@@ -1,14 +1,31 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../entities/user.entity';
 
 export class UserResponseDto {
+  @ApiProperty({ example: 'uid_abc123', description: 'Firebase Auth UID (also the Firestore document ID)' })
   id!: string;
+
   get uid(): string { return this.id; }
+
+  @ApiProperty({ example: 'maria@example.com' })
   email!: string;
+
+  @ApiProperty({ example: 'María García' })
   name!: string;
+
+  @ApiProperty({ example: '+573001234567' })
   phone!: string;
+
+  @ApiProperty({ example: false })
   isTutor!: boolean;
+
+  @ApiProperty({ example: ['ISIS3710'], required: false, type: [String] })
   courses?: string[];
+
+  @ApiProperty({ example: '2024-01-15T10:30:00.000Z' })
   createdAt!: Date;
+
+  @ApiProperty({ example: '2024-01-15T10:30:00.000Z' })
   updatedAt!: Date;
 
   static fromEntity(user: User): UserResponseDto {
