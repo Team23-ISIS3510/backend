@@ -28,6 +28,9 @@ export class UserResponseDto {
   @ApiProperty({ example: '2024-01-15T10:30:00.000Z' })
   updatedAt!: Date;
 
+  @ApiProperty({ example: 'I am a dedicated student...', required: false })
+  description?: string;
+
   static fromEntity(user: User): UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = user.id;
@@ -35,7 +38,8 @@ export class UserResponseDto {
     dto.name = user.name;
     dto.phone = user.phone;
     dto.isTutor = user.isTutor;
-    if (user.isTutor) dto.courses = user.courses ?? [];
+    dto.courses = user.courses ?? [];
+    dto.description = user.description;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;
     return dto;

@@ -35,7 +35,8 @@ export class UserService {
 
   async update(id: string, dto: UpdateUserDto): Promise<UserResponseDto> {
     const user = await this.userRepository.update(id, dto);
-    return UserResponseDto.fromEntity(user);
+    const result = UserResponseDto.fromEntity(user);
+    return result;
   }
 
   async delete(id: string): Promise<void> {
