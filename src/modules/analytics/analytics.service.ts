@@ -3,7 +3,6 @@ import { FirebaseService } from '../firebase/firebase.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { DemandMetricsDto } from './dto/demand-metrics.dto';
-import * as admin from 'firebase-admin';
 
 export interface AvailableTutorResult {
   id: string;
@@ -213,7 +212,7 @@ export class AnalyticsService {
 
   /**
    * BQ4: Fetch tutoring sessions from date range, excluding cancelled sessions
-   * Note: Filters out cancelled sessions in-memory to avoid requiring composite index
+   * Note: Fetches all sessions and filters by date/status in-memory to avoid index requirements
    */
   private async fetchSessionsByDateRange(
     startDate: Date,
@@ -221,22 +220,22 @@ export class AnalyticsService {
   ): Promise<any[]> {
     try {
       const db = this.firebaseService.getFirestore();
-      const startTimestamp = admin.firestore.Timestamp.fromDate(startDate);
-      const endTimestamp = admin.firestore.Timestamp.fromDate(endDate);
 
-      // Query without status inequality to avoid composite index requirement
+      // Query all sessions without date filters to avoid composite index requirement
       const snapshot = await db
         .collection('tutoring_sessions')
-        .where('createdAt', '>=', startTimestamp)
-        .where('createdAt', '<=', endTimestamp)
-        .orderBy('createdAt', 'desc')
         .get();
 
-      // Filter out cancelled sessions in memory
+      // Filter by date range and status in memory
       const sessions = snapshot.docs
         .filter((doc) => {
           const data = doc.data();
-          return data.status !== 'cancelled';
+          if (data.status === 'cancelled') return false;
+          
+          const createdAt = this.safeToDate(data.createdAt);
+          if (!createdAt) return false;
+          
+          return createdAt >= startDate && createdAt <= endDate;
         })
         .map((doc) => {
           const data = doc.data();
@@ -512,6 +511,8 @@ export class AnalyticsService {
 
   /**
    * BQ4: Fetch tutoring sessions for specific tutor from date range
+   * Note: Filters by tutorId only in Firestore, then filters dates and status in-memory
+   * to avoid requiring composite index
    */
   private async fetchSessionsByTutorAndDateRange(
     tutorId: string,
@@ -520,22 +521,22 @@ export class AnalyticsService {
   ): Promise<any[]> {
     try {
       const db = this.firebaseService.getFirestore();
-      const startTimestamp = admin.firestore.Timestamp.fromDate(startDate);
-      const endTimestamp = admin.firestore.Timestamp.fromDate(endDate);
 
       const snapshot = await db
         .collection('tutoring_sessions')
         .where('tutorId', '==', tutorId)
-        .where('createdAt', '>=', startTimestamp)
-        .where('createdAt', '<=', endTimestamp)
-        .orderBy('createdAt', 'desc')
         .get();
 
-      // Filter out cancelled sessions in memory
+      // Filter by date range and status in memory
       const sessions = snapshot.docs
         .filter((doc) => {
           const data = doc.data();
-          return data.status !== 'cancelled';
+          if (data.status === 'cancelled') return false;
+          
+          const createdAt = this.safeToDate(data.createdAt);
+          if (!createdAt) return false;
+          
+          return createdAt >= startDate && createdAt <= endDate;
         })
         .map((doc) => {
           const data = doc.data();
