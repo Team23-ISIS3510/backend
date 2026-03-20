@@ -18,7 +18,8 @@
     "firebase-init": "node scripts/firebase-init-data.js",
     "test-gdrive": "node scripts/test-google-drive.js",
     "setup-admin-oauth": "node scripts/setup-admin-oauth.js",
-    "reset-seed": "node scripts/reset-seed-firebase.js"
+    "reset-seed": "node scripts/reset-seed-firebase.js",
+    "seed-tutoring": "node scripts/seed-tutoring-sessions.js"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",

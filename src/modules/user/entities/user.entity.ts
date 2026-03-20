@@ -6,6 +6,7 @@ export interface User {
   isTutor: boolean;
   courses?: string[];
   description?: string;
+  rating?: number;
   createdAt: Date;
   updatedAt: Date;
 }
