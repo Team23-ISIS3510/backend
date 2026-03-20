@@ -1,10 +1,11 @@
 export interface User {
-  id: string; // Firebase Auth UID — used as Firestore document ID
+  id: string;
   email: string;
   name: string;
   phone: string;
   isTutor: boolean;
-  courses?: string[]; // only meaningful when isTutor = true
+  courses?: string[];
+  description?: string;
   createdAt: Date;
   updatedAt: Date;
 }
