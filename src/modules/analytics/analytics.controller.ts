@@ -1,6 +1,7 @@
-import { Controller, Get, Query, BadRequestException, Logger } from '@nestjs/common';
+import { Controller, Get, Query, BadRequestException, Logger, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nestjs/swagger';
 import { AnalyticsService, AvailableTutorResult } from './analytics.service';
+import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 
 class AvailableTutorsResponseDto {
   @ApiProperty({ example: true })
@@ -102,5 +103,102 @@ export class AnalyticsController {
       count: tutors.length,
       tutors,
     };
+  }
+
+  /**
+   * BQ4: GET /analytics/tutor-occupancy
+   * 
+   * Returns tutor occupancy and demand analysis for the last 2 years
+   * Compares session volume against available hours per tutor-subject
+   * Separates metrics by high-demand and normal periods
+   * 
+   * High-demand academic periods:
+   * - Mar 1-15, May 17-31, Sep 13-27, Nov 29 - Dec 6
+   * 
+   * Intended to show insights on home page and help identify
+   * overbooking/underutilization of tutors by subject
+   */
+  @Get('tutor-occupancy')
+  @ApiOperation({
+    summary: 'BQ4: Tutor occupancy and demand analysis (all tutors)',
+    description:
+      'Calculates session volume vs available hours for each tutor-subject combination over 2 years. ' +
+      'Separates metrics by high-demand academic periods.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of tutor occupancy metrics by subject',
+    type: [TutorOccupancyDto],
+  })
+  @ApiResponse({ status: 500, description: 'Error calculating analytics' })
+  async getTutorOccupancyAnalytics(): Promise<{
+    success: boolean;
+    count: number;
+    data: TutorOccupancyDto[];
+  }> {
+    try {
+      this.logger.log('BQ4: Fetching tutor occupancy analytics (all tutors)');
+      const data = await this.analyticsService.getTutorOccupancyAnalytics();
+
+      return {
+        success: true,
+        count: data.length,
+        data,
+      };
+    } catch (error) {
+      this.logger.error('BQ4: Error fetching tutor occupancy analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * BQ4: GET /analytics/tutor-occupancy/:tutorId
+   * 
+   * Returns occupancy and demand analysis for a specific tutor (last 2 years)
+   * Breaks down metrics by subject for individual tutor insight
+   * 
+   * @param tutorId Firebase UID of the tutor
+   * @returns Array of metrics for each subject this tutor teaches
+   */
+  @Get('tutor-occupancy/:tutorId')
+  @ApiOperation({
+    summary: 'BQ4: Tutor occupancy analysis by tutor ID',
+    description:
+      'Calculates session volume vs available hours for a specific tutor across all subjects. ' +
+      'Shows demand metrics broken down by subject.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of occupancy metrics for this tutor by subject',
+    type: [TutorOccupancyDto],
+  })
+  @ApiResponse({ status: 400, description: 'Missing or invalid tutorId' })
+  @ApiResponse({ status: 500, description: 'Error calculating analytics' })
+  async getTutorOccupancyByTutorId(
+    @Param('tutorId') tutorId: string,
+  ): Promise<{
+    success: boolean;
+    tutorId: string;
+    count: number;
+    data: TutorOccupancyDto[];
+  }> {
+    try {
+      if (!tutorId || !tutorId.trim()) {
+        throw new BadRequestException('Parameter "tutorId" is required');
+      }
+
+      this.logger.log(`BQ4: Fetching tutor occupancy analytics for tutorId: ${tutorId}`);
+      const data = await this.analyticsService.getTutorOccupancyByTutorId(tutorId.trim());
+
+      return {
+        success: true,
+        tutorId: tutorId.trim(),
+        count: data.length,
+        data,
+      };
+    } catch (error) {
+      this.logger.error(`BQ4: Error fetching tutor occupancy for ${tutorId}:`, error);
+      throw error;
+    }
   }
 }
