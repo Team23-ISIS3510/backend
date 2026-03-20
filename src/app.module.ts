@@ -14,6 +14,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
 import { CalicoCalendarModule } from './modules/calico-calendar/calico-calendar.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { NotificationModule } from './modules/notification/notification.module';
     CalicoCalendarModule,
     PaymentModule,
     NotificationModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

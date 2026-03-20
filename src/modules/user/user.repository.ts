@@ -23,6 +23,7 @@ export class UserRepository {
       phone: data.phone,
       isTutor: data.isTutor,
       courses: data.courses,
+      rating: typeof data.rating === 'number' ? data.rating : undefined,
       createdAt: this.firebase.parseDate(data.createdAt) ?? new Date(),
       updatedAt: this.firebase.parseDate(data.updatedAt) ?? new Date(),
     };
