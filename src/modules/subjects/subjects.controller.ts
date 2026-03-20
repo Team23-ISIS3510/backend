@@ -1,14 +1,18 @@
-import { Controller, Get, Query, Param, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Query, Param, HttpException, HttpStatus, Logger, NotFoundException } from '@nestjs/common';
 import { SubjectsService } from './subjects.service';
 import { TutoringSession } from './entities/tutoring-session.entity';
 import { ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { UserService } from '../user/user.service';
 
 @ApiTags('Tutoring Sessions')
 @Controller('subjects')
 export class SubjectsController {
   private readonly logger = new Logger(SubjectsController.name);
 
-  constructor(private readonly subjectsService: SubjectsService) {}
+  constructor(
+    private readonly subjectsService: SubjectsService,
+    private readonly userService: UserService,
+  ) {}
 
   /**
    * ===== RUTAS ESPECÍFICAS (DEBEN IR PRIMERO) =====
@@ -77,7 +81,24 @@ export class SubjectsController {
   @Get('history/tutor/:tutorId')
   async getSubjectsHistoryByTutor(@Param('tutorId') tutorId: string): Promise<{ success: boolean; count: number; data: any[] }> {
     try {
-      const subjects = await this.subjectsService.getSubjectsHistoryByTutor(tutorId);
+      let resolvedTutorId = tutorId;
+
+      // If tutorId looks like an email, resolve it to Firebase UID
+      if (tutorId.includes('@')) {
+        this.logger.log(`Email provided, resolving to UID: ${tutorId}`);
+        try {
+          const user = await this.userService.getUserByEmail(tutorId.trim());
+          if (!user) {
+            throw new NotFoundException(`Tutor with email ${tutorId} not found`);
+          }
+          resolvedTutorId = user.id; // Use Firebase UID
+          this.logger.log(`Resolved email ${tutorId} to UID ${resolvedTutorId}`);
+        } catch (err) {
+          throw new NotFoundException(`Tutor with email ${tutorId} not found`);
+        }
+      }
+
+      const subjects = await this.subjectsService.getSubjectsHistoryByTutor(resolvedTutorId);
       if (subjects.length === 0) {
         throw new HttpException(
           `No se encontraron sesiones para el tutor ${tutorId}`,
