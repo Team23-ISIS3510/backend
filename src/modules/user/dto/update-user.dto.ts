@@ -23,6 +23,10 @@ export class UpdateUserDto {
     type: [String],
     description: 'Replace the full list of courses the tutor teaches',
   })
+
+  @ApiProperty({ example: 'I am a dedicated student...', required: false})
+  
+
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
@@ -38,4 +42,7 @@ export class UpdateUserDto {
   @Max(5)
   @IsOptional()
   rating?: number;
+  @IsString()
+  @IsOptional()
+  description?: string;
 }
