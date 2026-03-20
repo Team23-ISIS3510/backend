@@ -11,9 +11,9 @@
  *  • 3 tutors          → collection: users
  *  • 6 availability blocks (within the next 4 h)
  *                      → collection: availabilities
- *  • 1 upcoming session → collection: tutoringSession
+ *  • 1 upcoming session → collection: tutoring_sessions
  *  • 3 completed sessions (only when --studentId is provided)
- *                      → collection: tutoringSession
+ *                      → collection: tutoring_sessions
  *    Ana García × 2 for Cálculo  → she becomes the "go-to tutor"
  *    Luis Mora   × 1 for Cálculo
  *
@@ -369,10 +369,10 @@ async function clean() {
   for (const id of AVAIL_IDS)
     batch.delete(db.collection('availabilities').doc(id));
 
-  batch.delete(db.collection('tutoringSession').doc(SESSION_ID));
+  batch.delete(db.collection('tutoring_sessions').doc(SESSION_ID));
 
   for (const id of HISTORY_IDS)
-    batch.delete(db.collection('tutoringSession').doc(id));
+    batch.delete(db.collection('tutoring_sessions').doc(id));
 
   await batch.commit();
   console.log('✅ Seed data deleted.\n');
@@ -410,15 +410,15 @@ async function seed() {
   // Upcoming session
   console.log('\n📅 Writing demo session …');
   const session = buildSession();
-  await db.collection('tutoringSession').doc(session.id).set(session.data, { merge: true });
-  console.log(`   ✓ tutoringSession/${session.id}`);
+  await db.collection('tutoring_sessions').doc(session.id).set(session.data, { merge: true });
+  console.log(`   ✓ tutoring_sessions/${session.id}`);
 
   // Completed sessions (Your Go-To Tutor feature)
   if (studentIdArg) {
     console.log(`\n📖 Writing completed sessions for student ${studentIdArg} …`);
     for (const { id, data } of buildHistory(studentIdArg)) {
-      await db.collection('tutoringSession').doc(id).set(data, { merge: true });
-      console.log(`   ✓ tutoringSession/${id}  (${data.tutorName} × ${data.courseId}, completed)`);
+      await db.collection('tutoring_sessions').doc(id).set(data, { merge: true });
+      console.log(`   ✓ tutoring_sessions/${id}  (${data.tutorName} × ${data.courseId}, completed)`);
     }
   } else {
     console.log('\n💡 Tip: pass --studentId=<your_firebase_uid> to also seed the');
