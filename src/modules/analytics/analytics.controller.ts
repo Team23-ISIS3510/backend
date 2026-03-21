@@ -1,6 +1,6 @@
 import { Controller, Get, Query, BadRequestException, Logger, Param, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nestjs/swagger';
-import { AnalyticsService, AvailableTutorResult } from './analytics.service';
+import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { UserService } from '../user/user.service';
 
@@ -237,7 +237,9 @@ export class AnalyticsController {
       this.logger.error(`BQ4: Error fetching tutor occupancy for ${tutorId}:`, error);
       throw error;
     }
-=======
+  }
+
+  /**
    * GET /analytics/returning-tutor?student=<uid>&course=<courseId>
    *
    * Returns the tutor the student has booked most for this course,
@@ -278,6 +280,5 @@ export class AnalyticsController {
       course: course.trim(),
       tutor,
     };
->>>>>>> b45f2e0cf2dd81c451dc4b9eb307c512d00f6061
   }
 }

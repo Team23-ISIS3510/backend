@@ -681,7 +681,10 @@ export class AnalyticsService {
         this.logger.warn('BQ4: Error converting number to Date:', error);
       }
     }
+    return null;
+  }
 
+  /**
    * Returns the student's most-booked tutor for a given course, provided that
    * tutor has an open availability slot within the next [lookAheadHours] hours.
    *
