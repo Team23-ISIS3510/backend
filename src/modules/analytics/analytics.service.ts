@@ -783,4 +783,101 @@ export class AnalyticsService {
     this.logger.log(`No returning tutor with upcoming availability for student ${studentId}`);
     return null;
   }
+
+  /**
+   * BQ1: Save a bug report to Firestore
+   * @param type Report type (CRASH, BUG, or LATENCY)
+   * @param message Error message or description
+   * @param deviceModel Optional device model
+   * @param timestamp Report timestamp
+   * @param additionalData Optional data for LATENCY type
+   */
+  async saveBugReport(
+    type: 'CRASH' | 'BUG' | 'LATENCY',
+    message: string,
+    deviceModel?: string,
+    timestamp?: Date,
+    additionalData?: {
+      endpoint?: string;
+      method?: string;
+      durationMs?: number;
+      statusCode?: number;
+    },
+  ): Promise<string> {
+    const db = this.firebaseService.getFirestore();
+    
+    const reportData = {
+      type,
+      message,
+      deviceModel: deviceModel || null,
+      timestamp: timestamp || new Date(),
+      ...(additionalData || {}),
+    };
+
+    const docRef = await db.collection('bugReports').add(reportData);
+    this.logger.log(`BQ1: Bug report saved with ID: ${docRef.id}`);
+    
+    return docRef.id;
+  }
+
+  /**
+   * BQ1: Get dashboard analytics data
+   * Returns bug counts by type and last 7 days trend
+   */
+  async getDashboardData(): Promise<{
+    countsByType: { type: string; count: number }[];
+    last7DaysTrend: { date: string; count: number }[];
+  }> {
+    const db = this.firebaseService.getFirestore();
+    
+    // Get all bug reports
+    const snapshot = await db.collection('bugReports').get();
+    
+    // Count by type (CRASH, BUG, LATENCY)
+    const typeCounts = new Map<string, number>();
+    const dateCounts = new Map<string, number>();
+    
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const type = data.type as string;
+      
+      // Count by type
+      typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      
+      // Count by date (last 7 days)
+      const timestamp = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+      if (timestamp >= sevenDaysAgo) {
+        const dateStr = timestamp.toISOString().split('T')[0];
+        dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
+      }
+    });
+    
+    // Convert maps to arrays
+    const countsByType = Array.from(typeCounts.entries()).map(([type, count]) => ({
+      type,
+      count,
+    }));
+    
+    // Fill in missing dates with 0 counts
+    const last7Days: { date: string; count: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      last7Days.push({
+        date: dateStr,
+        count: dateCounts.get(dateStr) || 0,
+      });
+    }
+    
+    this.logger.log(`BQ1: Dashboard data - ${snapshot.size} total reports`);
+    
+    return {
+      countsByType,
+      last7DaysTrend: last7Days,
+    };
+  }
 }
