@@ -124,6 +124,14 @@ export class TutoringSessionService {
     return await this.sessionRepository.findByStudent(studentId, limit);
   }
 
+  async getUpcomingSessions(tutorId: string, limit: number = 2): Promise<TutoringSession[]> {
+    return await this.sessionRepository.findUpcomingSessionsByTutor(tutorId, limit);
+  }
+
+  async getPreviousSessions(tutorId: string, limit: number = 2): Promise<TutoringSession[]> {
+    return await this.sessionRepository.findPreviousSessionsByTutor(tutorId, limit);
+  }
+
   /**
    * Book a specific slot for a student
    */

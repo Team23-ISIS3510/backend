@@ -1,6 +1,8 @@
-import { Controller, Get, Query, BadRequestException, Logger } from '@nestjs/common';
+import { Controller, Get, Query, BadRequestException, Logger, Param, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nestjs/swagger';
 import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
+import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
+import { UserService } from '../user/user.service';
 
 class AvailableTutorsResponseDto {
   @ApiProperty({ example: true })
@@ -44,7 +46,10 @@ class ReturningTutorResponseDto {
 export class AnalyticsController {
   private readonly logger = new Logger(AnalyticsController.name);
 
-  constructor(private readonly analyticsService: AnalyticsService) {}
+  constructor(
+    private readonly analyticsService: AnalyticsService,
+    private readonly userService: UserService,
+  ) {}
 
   /**
    * GET /analytics/available-tutors?course=ISIS3710
@@ -116,6 +121,122 @@ export class AnalyticsController {
       count: tutors.length,
       tutors,
     };
+  }
+
+  /**
+<<<<<<< HEAD
+   * BQ4: GET /analytics/tutor-occupancy
+   * 
+   * Returns tutor occupancy and demand analysis for the last 2 years
+   * Compares session volume against available hours per tutor-subject
+   * Separates metrics by high-demand and normal periods
+   * 
+   * High-demand academic periods:
+   * - Mar 1-15, May 17-31, Sep 13-27, Nov 29 - Dec 6
+   * 
+   * Intended to show insights on home page and help identify
+   * overbooking/underutilization of tutors by subject
+   */
+  @Get('tutor-occupancy')
+  @ApiOperation({
+    summary: 'BQ4: Tutor occupancy and demand analysis (all tutors)',
+    description:
+      'Calculates session volume vs available hours for each tutor-subject combination over 2 years. ' +
+      'Separates metrics by high-demand academic periods.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of tutor occupancy metrics by subject',
+    type: [TutorOccupancyDto],
+  })
+  @ApiResponse({ status: 500, description: 'Error calculating analytics' })
+  async getTutorOccupancyAnalytics(): Promise<{
+    success: boolean;
+    count: number;
+    data: TutorOccupancyDto[];
+  }> {
+    try {
+      this.logger.log('BQ4: Fetching tutor occupancy analytics (all tutors)');
+      const data = await this.analyticsService.getTutorOccupancyAnalytics();
+
+      return {
+        success: true,
+        count: data.length,
+        data,
+      };
+    } catch (error) {
+      this.logger.error('BQ4: Error fetching tutor occupancy analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * BQ4: GET /analytics/tutor-occupancy/:tutorId
+   * 
+   * Returns occupancy and demand analysis for a specific tutor (last 2 years)
+   * Breaks down metrics by subject for individual tutor insight
+   * 
+   * @param tutorId Firebase UID OR email of the tutor (auto-resolves email to UID)
+   * @returns Array of metrics for each subject this tutor teaches
+   */
+  @Get('tutor-occupancy/:tutorId')
+  @ApiOperation({
+    summary: 'BQ4: Tutor occupancy analysis by tutor ID or email',
+    description:
+      'Calculates session volume vs available hours for a specific tutor across all subjects. ' +
+      'Shows demand metrics broken down by subject. Accepts both Firebase UID and email address.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of occupancy metrics for this tutor by subject',
+    type: [TutorOccupancyDto],
+  })
+  @ApiResponse({ status: 400, description: 'Missing or invalid tutorId' })
+  @ApiResponse({ status: 404, description: 'Tutor not found' })
+  @ApiResponse({ status: 500, description: 'Error calculating analytics' })
+  async getTutorOccupancyByTutorId(
+    @Param('tutorId') tutorId: string,
+  ): Promise<{
+    success: boolean;
+    tutorId: string;
+    count: number;
+    data: TutorOccupancyDto[];
+  }> {
+    try {
+      if (!tutorId || !tutorId.trim()) {
+        throw new BadRequestException('Parameter "tutorId" is required');
+      }
+
+      let resolvedTutorId = tutorId.trim();
+
+      // If tutorId looks like an email, resolve it to Firebase UID
+      if (tutorId.includes('@')) {
+        this.logger.log(`BQ4: Email provided, resolving to UID: ${tutorId}`);
+        try {
+          const user = await this.userService.getUserByEmail(tutorId.trim());
+          if (!user) {
+            throw new NotFoundException(`Tutor with email ${tutorId} not found`);
+          }
+          resolvedTutorId = user.id; // Use Firebase UID
+          this.logger.log(`BQ4: Resolved email ${tutorId} to UID ${resolvedTutorId}`);
+        } catch (err) {
+          throw new NotFoundException(`Tutor with email ${tutorId} not found`);
+        }
+      }
+
+      this.logger.log(`BQ4: Fetching tutor occupancy analytics for tutorId: ${resolvedTutorId}`);
+      const data = await this.analyticsService.getTutorOccupancyByTutorId(resolvedTutorId);
+
+      return {
+        success: true,
+        tutorId: resolvedTutorId,
+        count: data.length,
+        data,
+      };
+    } catch (error) {
+      this.logger.error(`BQ4: Error fetching tutor occupancy for ${tutorId}:`, error);
+      throw error;
+    }
   }
 
   /**
