@@ -1,8 +1,10 @@
-import { Controller, Get, Query, BadRequestException, Logger, Param, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, BadRequestException, Logger, Param, NotFoundException, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
+import { CreateBugReportDto } from './dto/bug-report.dto';
 import { UserService } from '../user/user.service';
 
 class AvailableTutorsResponseDto {
@@ -285,29 +287,267 @@ export class AnalyticsController {
   }
 
   @Get('bookable-tutors')
-@ApiOperation({ summary: 'Available tutors with slot booking info' })
-@ApiQuery({ name: 'course', required: true })
-@ApiQuery({ name: 'minRating', required: false, type: Number })
-@ApiQuery({ name: 'withinHours', required: false, type: Number })
-async getBookableTutors(
-  @Query('course') course: string,
-  @Query('minRating') minRating?: string,
-  @Query('withinHours') withinHours?: string,
-) {
-  const parsedMinRating = minRating ? parseFloat(minRating) : 4.5;
-  const parsedWithinHours = withinHours ? parseFloat(withinHours) : 4;
+  @ApiOperation({ summary: 'Available tutors with slot booking info' })
+  @ApiQuery({ name: 'course', required: true })
+  @ApiQuery({ name: 'minRating', required: false, type: Number })
+  @ApiQuery({ name: 'withinHours', required: false, type: Number })
+  async getBookableTutors(
+    @Query('course') course: string,
+    @Query('minRating') minRating?: string,
+    @Query('withinHours') withinHours?: string,
+  ) {
+    const parsedMinRating = minRating ? parseFloat(minRating) : 4.5;
+    const parsedWithinHours = withinHours ? parseFloat(withinHours) : 4;
 
-  const tutors = await this.analyticsBookingService.getBookableTutorsForCourse(
-    course.trim(),
-    parsedMinRating,
-    parsedWithinHours,
-  );
+    const tutors = await this.analyticsBookingService.getBookableTutorsForCourse(
+      course.trim(),
+      parsedMinRating,
+      parsedWithinHours,
+    );
 
-  return {
-    success: true,
-    course: course.trim(),
-    count: tutors.length,
-    tutors,
-  };
-}
+    return {
+      success: true,
+      course: course.trim(),
+      count: tutors.length,
+      tutors,
+    };
+  }
+
+  /**
+   * BQ1: POST /analytics/bug
+   * 
+   * Receives bug reports from the Kotlin mobile app
+   * Stores crash reports, bugs, and other telemetry data
+   */
+  @Post('bug')
+  @ApiOperation({
+    summary: 'BQ1: Submit a bug report from mobile app',
+    description: 'Receives and stores bug reports including crashes, bugs, and latency issues from the mobile app',
+  })
+  @ApiResponse({ status: 201, description: 'Bug report saved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid request body' })
+  async createBugReport(@Body() dto: CreateBugReportDto) {
+    this.logger.log(`BQ1: Received bug report - Type: ${dto.type}`);
+    
+    const timestamp = dto.timestamp ? new Date(dto.timestamp) : new Date();
+    
+    const reportId = await this.analyticsService.saveBugReport(
+      dto.type,
+      dto.message,
+      dto.deviceModel,
+      timestamp,
+    );
+
+    return {
+      success: true,
+      reportId,
+      message: 'Bug report saved successfully',
+    };
+  }
+
+  /**
+   * BQ1: GET /analytics/dashboard
+   * 
+   * Returns an HTML dashboard with Chart.js visualizations
+   * Shows pie chart of bug types and trend line of last 7 days
+   */
+  @Get('dashboard')
+  @ApiOperation({
+    summary: 'BQ1: Bug report analytics dashboard',
+    description: 'Returns an HTML page with Chart.js visualizations showing bug counts by type and 7-day trend',
+  })
+  @ApiResponse({ status: 200, description: 'HTML dashboard page', content: { 'text/html': {} } })
+  async getDashboard(@Res() res: Response) {
+    this.logger.log('BQ1: Generating dashboard');
+    
+    const data = await this.analyticsService.getDashboardData();
+    
+    // Prepare data for Chart.js
+    const pieLabels = data.countsByType.map(item => item.type);
+    const pieCounts = data.countsByType.map(item => item.count);
+    
+    const trendLabels = data.last7DaysTrend.map(item => item.date);
+    const trendCounts = data.last7DaysTrend.map(item => item.count);
+    
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BQ1 Analytics Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 40px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    .charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+    .chart-container {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    }
+    h2 {
+      color: #333;
+      margin-top: 0;
+      text-align: center;
+      font-size: 1.3em;
+    }
+    .stats {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 20px;
+    }
+    .stat-item {
+      text-align: center;
+      padding: 15px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    }
+    .stat-value {
+      font-size: 2em;
+      font-weight: bold;
+      color: #667eea;
+    }
+    .stat-label {
+      color: #666;
+      font-size: 0.9em;
+      margin-top: 5px;
+    }
+    @media (max-width: 768px) {
+      .charts {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🐛 BQ1 Telemetry Dashboard</h1>
+    
+    <div class="stats">
+      ${data.countsByType.map(item => `
+        <div class="stat-item">
+          <div class="stat-value">${item.count}</div>
+          <div class="stat-label">${item.type}</div>
+        </div>
+      `).join('')}
+      <div class="stat-item">
+        <div class="stat-value">${data.countsByType.reduce((sum, item) => sum + item.count, 0)}</div>
+        <div class="stat-label">TOTAL</div>
+      </div>
+    </div>
+    
+    <div class="charts">
+      <div class="chart-container">
+        <h2>Bug Reports by Type</h2>
+        <canvas id="pieChart"></canvas>
+      </div>
+      
+      <div class="chart-container">
+        <h2>Last 7 Days Trend</h2>
+        <canvas id="trendChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Pie Chart - Bug Types
+    const pieCtx = document.getElementById('pieChart').getContext('2d');
+    new Chart(pieCtx, {
+      type: 'pie',
+      data: {
+        labels: ${JSON.stringify(pieLabels)},
+        datasets: [{
+          data: ${JSON.stringify(pieCounts)},
+          backgroundColor: [
+            'rgba(255, 99, 132, 0.8)',
+            'rgba(54, 162, 235, 0.8)',
+            'rgba(255, 206, 86, 0.8)',
+            'rgba(75, 192, 192, 0.8)',
+          ],
+          borderColor: [
+            'rgba(255, 99, 132, 1)',
+            'rgba(54, 162, 235, 1)',
+            'rgba(255, 206, 86, 1)',
+            'rgba(75, 192, 192, 1)',
+          ],
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'bottom',
+          }
+        }
+      }
+    });
+
+    // Line Chart - 7 Day Trend
+    const trendCtx = document.getElementById('trendChart').getContext('2d');
+    new Chart(trendCtx, {
+      type: 'line',
+      data: {
+        labels: ${JSON.stringify(trendLabels)},
+        datasets: [{
+          label: 'Bug Reports',
+          data: ${JSON.stringify(trendCounts)},
+          borderColor: 'rgba(102, 126, 234, 1)',
+          backgroundColor: 'rgba(102, 126, 234, 0.2)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            display: false
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              stepSize: 1
+            }
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
+    `;
+    
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  }
 }
