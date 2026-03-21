@@ -22,6 +22,9 @@ export class UserResponseDto {
   @ApiProperty({ example: ['ISIS3710'], required: false, type: [String] })
   courses?: string[];
 
+  @ApiProperty({ example: 4.8, required: false, description: 'Average rating (1–5); only present for tutors' })
+  rating?: number;
+
   @ApiProperty({ example: '2024-01-15T10:30:00.000Z' })
   createdAt!: Date;
 
@@ -38,6 +41,10 @@ export class UserResponseDto {
     dto.name = user.name;
     dto.phone = user.phone;
     dto.isTutor = user.isTutor;
+    if (user.isTutor) {
+      dto.courses = user.courses ?? [];
+      if (user.rating !== undefined) dto.rating = user.rating;
+    }
     dto.courses = user.courses ?? [];
     dto.description = user.description;
     dto.createdAt = user.createdAt;
