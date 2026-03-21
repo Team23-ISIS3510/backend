@@ -1,6 +1,7 @@
 import { Controller, Get, Query, BadRequestException, Logger, Param, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nestjs/swagger';
 import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
+import { AnalyticsBookingService } from './analytics-booking.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { UserService } from '../user/user.service';
 
@@ -48,6 +49,7 @@ export class AnalyticsController {
 
   constructor(
     private readonly analyticsService: AnalyticsService,
+     private readonly analyticsBookingService: AnalyticsBookingService,
     private readonly userService: UserService,
   ) {}
 
@@ -124,7 +126,7 @@ export class AnalyticsController {
   }
 
   /**
-<<<<<<< HEAD
+
    * BQ4: GET /analytics/tutor-occupancy
    * 
    * Returns tutor occupancy and demand analysis for the last 2 years
@@ -281,4 +283,31 @@ export class AnalyticsController {
       tutor,
     };
   }
+
+  @Get('bookable-tutors')
+@ApiOperation({ summary: 'Available tutors with slot booking info' })
+@ApiQuery({ name: 'course', required: true })
+@ApiQuery({ name: 'minRating', required: false, type: Number })
+@ApiQuery({ name: 'withinHours', required: false, type: Number })
+async getBookableTutors(
+  @Query('course') course: string,
+  @Query('minRating') minRating?: string,
+  @Query('withinHours') withinHours?: string,
+) {
+  const parsedMinRating = minRating ? parseFloat(minRating) : 4.5;
+  const parsedWithinHours = withinHours ? parseFloat(withinHours) : 4;
+
+  const tutors = await this.analyticsBookingService.getBookableTutorsForCourse(
+    course.trim(),
+    parsedMinRating,
+    parsedWithinHours,
+  );
+
+  return {
+    success: true,
+    course: course.trim(),
+    count: tutors.length,
+    tutors,
+  };
+}
 }
