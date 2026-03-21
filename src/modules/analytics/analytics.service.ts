@@ -168,7 +168,7 @@ export class AnalyticsService {
 
     // Step 1: Completed sessions for this student + course
     const sessionsSnap = await db
-      .collection('tutoringSession')
+      .collection('tutoring_sessions')
       .where('studentId', '==', studentId)
       .where('courseId', '==', courseId)
       .where('status', '==', 'completed')
