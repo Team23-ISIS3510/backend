@@ -27,6 +27,20 @@ class AvailableTutorsResponseDto {
   tutors: AvailableTutorResult[];
 }
 
+class ReturningTutorResponseDto {
+  @ApiProperty({ example: true })
+  success: boolean;
+
+  @ApiProperty({ example: 'user-uid-123' })
+  student: string;
+
+  @ApiProperty({ example: 'ISIS3710' })
+  course: string;
+
+  @ApiProperty({ nullable: true, description: 'Most-booked tutor with an upcoming slot, or null if none found' })
+  tutor: ReturningTutorResult | null;
+}
+
 @ApiTags('Analytics')
 @Controller('analytics')
 export class AnalyticsController {
@@ -110,6 +124,7 @@ export class AnalyticsController {
   }
 
   /**
+<<<<<<< HEAD
    * BQ4: GET /analytics/tutor-occupancy
    * 
    * Returns tutor occupancy and demand analysis for the last 2 years
@@ -222,5 +237,47 @@ export class AnalyticsController {
       this.logger.error(`BQ4: Error fetching tutor occupancy for ${tutorId}:`, error);
       throw error;
     }
+=======
+   * GET /analytics/returning-tutor?student=<uid>&course=<courseId>
+   *
+   * Returns the tutor the student has booked most for this course,
+   * provided they have an open slot in the next 48 hours.
+   * Returns null in the `tutor` field if no match is found.
+   */
+  @Get('returning-tutor')
+  @ApiOperation({
+    summary: "Student's most-booked tutor for a course with upcoming availability",
+    description:
+      'Aggregates the student\'s completed session history per tutor for the given course, ' +
+      'ranks by booking frequency, and returns the top-ranked tutor who has an open slot ' +
+      'in the next 48 hours. Designed to power the "Your Go-To Tutor" card on the course detail screen.',
+  })
+  @ApiQuery({ name: 'student', required: true, description: 'Firebase UID of the student' })
+  @ApiQuery({ name: 'course', required: true, description: 'Course ID' })
+  @ApiResponse({ status: 200, type: ReturningTutorResponseDto })
+  @ApiResponse({ status: 400, description: 'Missing student or course parameter' })
+  async getReturningTutor(
+    @Query('student') student: string,
+    @Query('course') course: string,
+  ): Promise<ReturningTutorResponseDto> {
+    if (!student?.trim()) {
+      throw new BadRequestException('Query parameter "student" is required');
+    }
+    if (!course?.trim()) {
+      throw new BadRequestException('Query parameter "course" is required');
+    }
+
+    const tutor = await this.analyticsService.getReturningTutorForStudent(
+      student.trim(),
+      course.trim(),
+    );
+
+    return {
+      success: true,
+      student: student.trim(),
+      course: course.trim(),
+      tutor,
+    };
+>>>>>>> b45f2e0cf2dd81c451dc4b9eb307c512d00f6061
   }
 }
