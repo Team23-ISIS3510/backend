@@ -401,5 +401,71 @@ export class TutoringSessionRepository {
       updatedAt: data.updatedAt?.toDate(),
     } as TutoringSession;
   }
+
+  async findUpcomingSessionsByTutor(tutorId: string, limit: number = 2): Promise<TutoringSession[]> {
+    try {
+      const now = new Date();
+      const snapshot = await this.firebaseService
+        .getFirestore()
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      const sessions: TutoringSession[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const session = this.mapDocToSession(doc.id, data);
+        // Filter only future sessions (scheduledStart > now)
+        if (session.scheduledStart && new Date(session.scheduledStart) > now) {
+          sessions.push(session);
+        }
+      });
+
+      // Sort by scheduledStart ascending (nearest first)
+      sessions.sort((a, b) => {
+        const dateA = new Date(a.scheduledStart).getTime();
+        const dateB = new Date(b.scheduledStart).getTime();
+        return dateA - dateB;
+      });
+
+      return sessions.slice(0, limit);
+    } catch (error) {
+      this.logger.error('Error finding upcoming sessions by tutor:', error);
+      throw error;
+    }
+  }
+
+  async findPreviousSessionsByTutor(tutorId: string, limit: number = 2): Promise<TutoringSession[]> {
+    try {
+      const now = new Date();
+      const snapshot = await this.firebaseService
+        .getFirestore()
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      const sessions: TutoringSession[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const session = this.mapDocToSession(doc.id, data);
+        // Filter only past sessions (scheduledStart < now)
+        if (session.scheduledStart && new Date(session.scheduledStart) < now) {
+          sessions.push(session);
+        }
+      });
+
+      // Sort by scheduledStart descending (most recent first)
+      sessions.sort((a, b) => {
+        const dateA = new Date(a.scheduledStart).getTime();
+        const dateB = new Date(b.scheduledStart).getTime();
+        return dateB - dateA;
+      });
+
+      return sessions.slice(0, limit);
+    } catch (error) {
+      this.logger.error('Error finding previous sessions by tutor:', error);
+      throw error;
+    }
+  }
 }
 
