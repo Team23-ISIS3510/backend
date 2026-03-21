@@ -2,6 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { LatencyInterceptor } from './common/interceptors/latency.interceptor';
+import { FirebaseService } from './modules/firebase/firebase.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -14,6 +16,10 @@ async function bootstrap() {
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
+
+  // BQ1: Register global latency interceptor
+  const firebaseService = app.get(FirebaseService);
+  app.useGlobalInterceptors(new LatencyInterceptor(firebaseService));
 
   const config = new DocumentBuilder()
     .setTitle('Calico – Monitorias API')
