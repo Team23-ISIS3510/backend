@@ -336,6 +336,15 @@ export class AnalyticsController {
       dto.message,
       dto.deviceModel,
       timestamp,
+      {
+        feature: dto.feature,
+        action: dto.action,
+        networkType: dto.networkType,
+        endpoint: dto.endpoint,
+        method: dto.method,
+        durationMs: dto.durationMs,
+        statusCode: dto.statusCode,
+      },
     );
 
     return {

@@ -51,7 +51,18 @@ export class UserRepository {
       createdAt: now,
       updatedAt: now,
     };
-    await this.col.doc(id).set(data);
+    try {
+      // Use create() instead of set() to make it atomic
+      // create() will fail if document already exists
+      await this.col.doc(id).create(data);
+    } catch (error: any) {
+      // Rethrow with proper context
+      if (error.code === 6) {
+        // ALREADY_EXISTS error
+        throw new Error(`User with ID ${id} already exists`);
+      }
+      throw error;
+    }
     return (await this.findById(id))!;
   }
 

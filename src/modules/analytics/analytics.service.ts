@@ -790,7 +790,7 @@ export class AnalyticsService {
    * @param message Error message or description
    * @param deviceModel Optional device model
    * @param timestamp Report timestamp
-   * @param additionalData Optional data for LATENCY type
+   * @param additionalData Optional context data from mobile app
    */
   async saveBugReport(
     type: 'CRASH' | 'BUG' | 'LATENCY',
@@ -798,6 +798,9 @@ export class AnalyticsService {
     deviceModel?: string,
     timestamp?: Date,
     additionalData?: {
+      feature?: string;
+      action?: string;
+      networkType?: string;
       endpoint?: string;
       method?: string;
       durationMs?: number;

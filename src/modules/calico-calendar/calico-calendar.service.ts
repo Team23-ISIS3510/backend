@@ -14,7 +14,12 @@ export class CalicoCalendarService implements OnModuleInit {
   constructor(private configService: ConfigService) {}
 
   async onModuleInit() {
-    await this.initializeAuth();
+    // Fire-and-forget: don't block startup if Google Calendar init fails
+    this.initializeAuth().catch(error => {
+      this.logger.warn(
+        `Google Calendar Service Account initialization deferred (will retry on first use): ${error.message}`,
+      );
+    });
   }
 
   async initializeAuth() {
