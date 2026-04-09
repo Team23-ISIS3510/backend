@@ -825,62 +825,88 @@ export class AnalyticsService {
 
   /**
    * BQ1: Get dashboard analytics data
-   * Returns bug counts by type and last 7 days trend
+   * Returns data structured for System Stability chart showing:
+   * - Crashes: app crashes
+   * - Bugs: user-reported bugs
+   * - Latency Issues: API requests that exceeded 2 second threshold
    */
   async getDashboardData(): Promise<{
-    countsByType: { type: string; count: number }[];
-    last7DaysTrend: { date: string; count: number }[];
+    summary: { crashes: number; bugs: number; latencyIssues: number };
+    dates: string[];
+    crashes: number[];
+    bugs: number[];
+    latencyIssues: number[];
   }> {
     const db = this.firebaseService.getFirestore();
-    
-    // Get all bug reports
     const snapshot = await db.collection('bugReports').get();
-    
-    // Count by type (CRASH, BUG, LATENCY)
-    const typeCounts = new Map<string, number>();
-    const dateCounts = new Map<string, number>();
-    
+
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      const type = data.type as string;
-      
-      // Count by type
-      typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
-      
-      // Count by date (last 7 days)
-      const timestamp = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
-      if (timestamp >= sevenDaysAgo) {
-        const dateStr = timestamp.toISOString().split('T')[0];
-        dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
-      }
-    });
-    
-    // Convert maps to arrays
-    const countsByType = Array.from(typeCounts.entries()).map(([type, count]) => ({
-      type,
-      count,
-    }));
-    
-    // Fill in missing dates with 0 counts
-    const last7Days: { date: string; count: number }[] = [];
+
+    // Initialize data structures for last 7 days
+    const dates: string[] = [];
+    const crashesByDay = new Map<string, number>();
+    const bugsByDay = new Map<string, number>();
+    const latencyIssuesByDay = new Map<string, number>();
+
+    // Pre-fill dates
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
-      last7Days.push({
-        date: dateStr,
-        count: dateCounts.get(dateStr) || 0,
-      });
+      dates.push(dateStr);
+      crashesByDay.set(dateStr, 0);
+      bugsByDay.set(dateStr, 0);
+      latencyIssuesByDay.set(dateStr, 0);
     }
-    
-    this.logger.log(`BQ1: Dashboard data - ${snapshot.size} total reports`);
-    
+
+    let totalCrashes = 0;
+    let totalBugs = 0;
+    let totalLatencyIssues = 0;
+
+    // Process reports
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const type = data.type as string;
+      const timestamp = data.timestamp?.toDate
+        ? data.timestamp.toDate()
+        : new Date(data.timestamp);
+
+      if (timestamp >= sevenDaysAgo) {
+        const dateStr = timestamp.toISOString().split('T')[0];
+
+        switch (type) {
+          case 'CRASH':
+            totalCrashes++;
+            crashesByDay.set(dateStr, (crashesByDay.get(dateStr) || 0) + 1);
+            break;
+          case 'BUG':
+            totalBugs++;
+            bugsByDay.set(dateStr, (bugsByDay.get(dateStr) || 0) + 1);
+            break;
+          case 'LATENCY':
+            // Count latency issues (requests >2s) like crashes/bugs
+            totalLatencyIssues++;
+            latencyIssuesByDay.set(dateStr, (latencyIssuesByDay.get(dateStr) || 0) + 1);
+            break;
+        }
+      }
+    });
+
+    this.logger.log(
+      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}`,
+    );
+
     return {
-      countsByType,
-      last7DaysTrend: last7Days,
+      summary: {
+        crashes: totalCrashes,
+        bugs: totalBugs,
+        latencyIssues: totalLatencyIssues,
+      },
+      dates,
+      crashes: dates.map((d) => crashesByDay.get(d) || 0),
+      bugs: dates.map((d) => bugsByDay.get(d) || 0),
+      latencyIssues: dates.map((d) => latencyIssuesByDay.get(d) || 0),
     };
   }
 }
