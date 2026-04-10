@@ -9,8 +9,8 @@ export class UserService {
   constructor(private readonly userRepository: UserRepository) {}
 
   async create(uid: string, dto: CreateUserDto): Promise<UserResponseDto> {
-    const existing = await this.userRepository.findById(uid);
-    if (existing) throw new ConflictException('User already exists');
+    // Don't check for existence - let repository handle atomicity
+    // This prevents race conditions where check passes but create fails
     const user = await this.userRepository.create(uid, dto);
     return UserResponseDto.fromEntity(user);
   }
@@ -35,7 +35,8 @@ export class UserService {
 
   async update(id: string, dto: UpdateUserDto): Promise<UserResponseDto> {
     const user = await this.userRepository.update(id, dto);
-    return UserResponseDto.fromEntity(user);
+    const result = UserResponseDto.fromEntity(user);
+    return result;
   }
 
   async delete(id: string): Promise<void> {

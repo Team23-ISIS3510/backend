@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
@@ -14,11 +15,11 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { UserResponseDto } from '../user/dto/user-response.dto';
-import { Logger } from '@nestjs/common';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly identityUrl = 'https://identitytoolkit.googleapis.com/v1/accounts';
 
 
@@ -38,18 +39,27 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<UserResponseDto> {
-    try {
-      // 1. Create Firebase Auth user
-      const authUser = await this.firebase.getAuth().createUser({
-        email: dto.email,
-        password: dto.password,
-        displayName: dto.name,
-      });
+    // 1. Create Firebase Auth user
+    const authUser = await this.firebase.getAuth().createUser({
+      email: dto.email,
+      password: dto.password,
+      displayName: dto.name,
+    });
 
+    try {
       // 2. Create Firestore user document
       const { password: _, ...userFields } = dto;
-      return this.userService.create(authUser.uid, userFields);
+      return await this.userService.create(authUser.uid, userFields);
     } catch (err: any) {
+      // Rollback: Delete Firebase Auth user if Firestore write fails
+      try {
+        await this.firebase.getAuth().deleteUser(authUser.uid);
+      } catch (deleteErr) {
+        Logger.warn(
+          `Failed to rollback Firebase Auth user ${authUser.uid} after Firestore error`,
+          deleteErr,
+        );
+      }
       throw this.mapFirebaseError(err);
     }
   }
@@ -109,26 +119,53 @@ export class AuthService {
 
   async login(dto: LoginDto): Promise<AuthResponseDto> {
     try {
-      const { data } = await firstValueFrom(
-        this.httpService.post<AuthResponseDto>(
-          `${this.identityUrl}:signInWithPassword?key=${this.firebaseApiKey}`,
-          {
-            email: dto.email,
-            password: dto.password,
-            returnSecureToken: true,
-          },
-        ),
+      this.logger.debug(`Login attempt for ${dto.email}`);
+      
+      const response$ = this.httpService.post<AuthResponseDto>(
+        `${this.identityUrl}:signInWithPassword?key=${this.firebaseApiKey}`,
+        {
+          email: dto.email,
+          password: dto.password,
+          returnSecureToken: true,
+        },
       );
+
+      const { data } = await firstValueFrom(response$);
+      this.logger.debug(`Login successful for ${dto.email}`);
       return data;
     } catch (error: any) {
-      const message = error?.response?.data?.error?.message ?? '';
+      // Log detailed error for debugging
+      const statusCode = error?.response?.status;
+      const firebaseError = error?.response?.data?.error?.message ?? '';
+      
+      this.logger.error('Login error', {
+        email: dto.email,
+        statusCode,
+        firebaseError,
+        errorCode: error?.code,
+        message: error?.message,
+      });
+
+      // Handle specific Firebase errors
       if (
-        message.includes('EMAIL_NOT_FOUND') ||
-        message.includes('INVALID_PASSWORD') ||
-        message.includes('INVALID_LOGIN_CREDENTIALS')
+        firebaseError.includes('EMAIL_NOT_FOUND') ||
+        firebaseError.includes('INVALID_PASSWORD') ||
+        firebaseError.includes('INVALID_LOGIN_CREDENTIALS')
       ) {
         throw new UnauthorizedException('Invalid email or password');
       }
+
+      // Handle network/timeout errors
+      if (!error?.response) {
+        this.logger.error(`Network error during login for ${dto.email}:`, error?.message);
+        throw new InternalServerErrorException('Unable to connect to authentication service');
+      }
+
+      // Return original Firebase error if available
+      if (firebaseError) {
+        throw new UnauthorizedException(firebaseError);
+      }
+
       throw new InternalServerErrorException('Login failed');
     }
   }

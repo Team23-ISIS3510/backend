@@ -8,10 +8,14 @@ export class FirebaseService implements OnModuleInit {
   private app: admin.app.App = null!;
   private readonly logger = new Logger(FirebaseService.name);
 
-  constructor(private configService: ConfigService) {}
+  constructor(private configService: ConfigService) {
+    // Initialize immediately in constructor to prevent race conditions
+    this.initializeApp();
+  }
 
   onModuleInit() {
-    this.initializeApp();
+    // Already initialized in constructor
+    this.logger.debug('FirebaseService module initialized');
   }
 
   private initializeApp() {

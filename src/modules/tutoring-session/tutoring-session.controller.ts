@@ -69,6 +69,42 @@ export class TutoringSessionController {
     }
   }
 
+  @ApiOperation({ summary: 'Get upcoming sessions for a tutor' })
+  @ApiResponse({ status: 200, description: 'List of upcoming sessions for tutor.' })
+  @ApiParam({ name: 'tutorId', required: true, description: 'Tutor id' })
+  @Get('tutor/:tutorId/upcoming')
+  async getUpcomingSessions(@Param('tutorId') tutorId: string) {
+    try {
+      const sessions = await this.sessionService.getUpcomingSessions(tutorId, 2);
+      return {
+        success: true,
+        sessions,
+        count: sessions.length,
+      };
+    } catch (error) {
+      this.logger.error(`Error getting upcoming sessions for tutor ${tutorId}:`, error);
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @ApiOperation({ summary: 'Get previous sessions for a tutor' })
+  @ApiResponse({ status: 200, description: 'List of previous sessions for tutor.' })
+  @ApiParam({ name: 'tutorId', required: true, description: 'Tutor id' })
+  @Get('tutor/:tutorId/previous')
+  async getPreviousSessions(@Param('tutorId') tutorId: string) {
+    try {
+      const sessions = await this.sessionService.getPreviousSessions(tutorId, 2);
+      return {
+        success: true,
+        sessions,
+        count: sessions.length,
+      };
+    } catch (error) {
+      this.logger.error(`Error getting previous sessions for tutor ${tutorId}:`, error);
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   @ApiOperation({ summary: 'Create a tutoring session' })
   @ApiResponse({ status: 201, description: 'Session created.' })
   @ApiBody({ schema: { example: { tutorId: 'string', studentId: 'string', start: 'ISO8601', end: 'ISO8601' } } })

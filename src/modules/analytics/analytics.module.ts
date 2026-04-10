@@ -1,16 +1,9 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
+import { AnalyticsBookingService } from './analytics-booking.service';
 import { FirebaseModule } from '../firebase/firebase.module';
 import { AvailabilityModule } from '../availability/availability.module';
-<<<<<<< Updated upstream
-
-@Module({
-  imports: [FirebaseModule, AvailabilityModule],
-  controllers: [AnalyticsController],
-  providers: [AnalyticsService],
-  exports: [AnalyticsService],
-=======
 import { UserModule } from '../user/user.module';
 import { TutoringSessionModule } from '../tutoring-session/tutoring-session.module';
 import { OccupancyRepository } from './repositories/occupancy.repository';
@@ -37,6 +30,5 @@ import { AvailabilityOccupancyUpdateService } from '../availability/availability
     TutoringSessionOccupancyUpdateService,
     AvailabilityOccupancyUpdateService,
   ],
->>>>>>> Stashed changes
 })
 export class AnalyticsModule {}

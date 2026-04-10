@@ -24,6 +24,7 @@ export class UserRepository {
       isTutor: data.isTutor,
       courses: data.courses,
       rating: typeof data.rating === 'number' ? data.rating : undefined,
+      description: data['description'],
       createdAt: this.firebase.parseDate(data.createdAt) ?? new Date(),
       updatedAt: this.firebase.parseDate(data.updatedAt) ?? new Date(),
     };
@@ -50,7 +51,18 @@ export class UserRepository {
       createdAt: now,
       updatedAt: now,
     };
-    await this.col.doc(id).set(data);
+    try {
+      // Use create() instead of set() to make it atomic
+      // create() will fail if document already exists
+      await this.col.doc(id).create(data);
+    } catch (error: any) {
+      // Rethrow with proper context
+      if (error.code === 6) {
+        // ALREADY_EXISTS error
+        throw new Error(`User with ID ${id} already exists`);
+      }
+      throw error;
+    }
     return (await this.findById(id))!;
   }
 
@@ -58,12 +70,16 @@ export class UserRepository {
     const docRef = this.col.doc(id);
     const snap = await docRef.get();
     if (!snap.exists) throw new NotFoundException(`User ${id} not found`);
-
-    const patch: Record<string, any> = { ...dto, updatedAt: this.firebase.getTimestamp() };
-
-    // if switching off tutor role, clear courses
+  
+    // Filter out undefined values before sending to Firestore
+    const patch: Record<string, any> = { updatedAt: this.firebase.getTimestamp() };
+    if (dto.name !== undefined) patch.name = dto.name;
+    if (dto.phone !== undefined) patch.phone = dto.phone;
+    if (dto.isTutor !== undefined) patch.isTutor = dto.isTutor;
+    if (dto.courses !== undefined) patch.courses = dto.courses;
+    if (dto.description !== undefined) patch.description = dto.description;
     if (dto.isTutor === false) patch.courses = [];
-
+  
     await docRef.update(patch);
     return (await this.findById(id))!;
   }

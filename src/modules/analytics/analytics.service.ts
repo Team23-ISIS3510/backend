@@ -24,6 +24,10 @@ export interface AvailableTutorResult {
   availableSlotsCount: number;
 }
 
+export interface ReturningTutorResult extends AvailableTutorResult {
+  bookingCount: number;
+}
+
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
@@ -807,7 +811,238 @@ export class AnalyticsService {
         this.logger.warn('BQ4: Error converting number to Date:', error);
       }
     }
+<<<<<<< HEAD
 
     return null;
   }
+=======
+    return null;
+  }
+
+  /**
+   * Returns the student's most-booked tutor for a given course, provided that
+   * tutor has an open availability slot within the next [lookAheadHours] hours.
+   *
+   * Pipeline:
+   *   1. Aggregate completed sessions → booking count per tutor for this course
+   *   2. Rank tutors by booking count DESC
+   *   3. Walk the ranking until we find one with upcoming availability
+   */
+  async getReturningTutorForStudent(
+    studentId: string,
+    courseId: string,
+    lookAheadHours: number = 48,
+  ): Promise<ReturningTutorResult | null> {
+    this.logger.log(
+      `Returning tutor – student: ${studentId}, course: ${courseId}, window: ${lookAheadHours}h`,
+    );
+
+    const db = this.firebaseService.getFirestore();
+
+    // Step 1: Completed sessions for this student + course
+    const sessionsSnap = await db
+      .collection('tutoring_sessions')
+      .where('studentId', '==', studentId)
+      .where('courseId', '==', courseId)
+      .where('status', '==', 'completed')
+      .get();
+
+    if (sessionsSnap.empty) {
+      this.logger.log(`No completed sessions for student ${studentId} in course ${courseId}`);
+      return null;
+    }
+
+    // Step 2: Aggregate booking count per tutor
+    const countByTutor = new Map<string, number>();
+    sessionsSnap.forEach((doc) => {
+      const tutorId = doc.data().tutorId as string;
+      if (tutorId) countByTutor.set(tutorId, (countByTutor.get(tutorId) ?? 0) + 1);
+    });
+
+    // Step 3: Rank by count DESC, then find the first one with upcoming availability
+    const ranked = [...countByTutor.entries()].sort((a, b) => b[1] - a[1]);
+
+    const now = new Date();
+    const windowEnd = new Date(now.getTime() + lookAheadHours * 60 * 60 * 1000);
+
+    for (const [tutorId, bookingCount] of ranked) {
+      try {
+        const userDoc = await db.collection('users').doc(tutorId).get();
+        if (!userDoc.exists) continue;
+        const raw = userDoc.data()!;
+
+        const availabilities = await this.availabilityRepository.findByTutorAndDateRange(
+          tutorId,
+          now,
+          windowEnd,
+        );
+
+        const active = availabilities.filter(
+          (a) => a.endDateTime && new Date(a.endDateTime) > now,
+        );
+        if (active.length === 0) continue;
+
+        const sorted = [...active].sort(
+          (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime(),
+        );
+        const next = sorted[0];
+
+        this.logger.log(
+          `Returning tutor for student ${studentId}: ${tutorId} (booked ${bookingCount}×)`,
+        );
+
+        return {
+          id: tutorId,
+          name: raw.name ?? '',
+          email: raw.email ?? '',
+          rating: typeof raw.rating === 'number' ? raw.rating : 0,
+          hourlyRate: typeof raw.hourlyRate === 'number' ? raw.hourlyRate : null,
+          bio: raw.bio ?? '',
+          profileImage: raw.profileImage ?? null,
+          location: raw.location ?? 'Virtual',
+          courses: Array.isArray(raw.courses) ? raw.courses : [],
+          nextAvailableSlot: {
+            startDateTime: new Date(next.startDateTime),
+            endDateTime: new Date(next.endDateTime),
+            location: next.location,
+            course: next.course,
+          },
+          availableSlotsCount: active.length,
+          bookingCount,
+        };
+      } catch (err) {
+        this.logger.warn(`Could not check returning tutor ${tutorId}:`, err);
+      }
+    }
+
+    this.logger.log(`No returning tutor with upcoming availability for student ${studentId}`);
+    return null;
+  }
+
+  /**
+   * BQ1: Save a bug report to Firestore
+   * @param type Report type (CRASH, BUG, or LATENCY)
+   * @param message Error message or description
+   * @param deviceModel Optional device model
+   * @param timestamp Report timestamp
+   * @param additionalData Optional context data from mobile app
+   */
+  async saveBugReport(
+    type: 'CRASH' | 'BUG' | 'LATENCY',
+    message: string,
+    deviceModel?: string,
+    timestamp?: Date,
+    additionalData?: {
+      feature?: string;
+      action?: string;
+      networkType?: string;
+      endpoint?: string;
+      method?: string;
+      durationMs?: number;
+      statusCode?: number;
+    },
+  ): Promise<string> {
+    const db = this.firebaseService.getFirestore();
+    
+    const reportData = {
+      type,
+      message,
+      deviceModel: deviceModel || null,
+      timestamp: timestamp || new Date(),
+      ...(additionalData || {}),
+    };
+
+    const docRef = await db.collection('bugReports').add(reportData);
+    this.logger.log(`BQ1: Bug report saved with ID: ${docRef.id}`);
+    
+    return docRef.id;
+  }
+
+  /**
+   * BQ1: Get dashboard analytics data
+   * Returns data structured for System Stability chart showing:
+   * - Crashes: app crashes
+   * - Bugs: user-reported bugs
+   * - Latency Issues: API requests that exceeded 2 second threshold
+   */
+  async getDashboardData(): Promise<{
+    summary: { crashes: number; bugs: number; latencyIssues: number };
+    dates: string[];
+    crashes: number[];
+    bugs: number[];
+    latencyIssues: number[];
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('bugReports').get();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // Initialize data structures for last 7 days
+    const dates: string[] = [];
+    const crashesByDay = new Map<string, number>();
+    const bugsByDay = new Map<string, number>();
+    const latencyIssuesByDay = new Map<string, number>();
+
+    // Pre-fill dates
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      dates.push(dateStr);
+      crashesByDay.set(dateStr, 0);
+      bugsByDay.set(dateStr, 0);
+      latencyIssuesByDay.set(dateStr, 0);
+    }
+
+    let totalCrashes = 0;
+    let totalBugs = 0;
+    let totalLatencyIssues = 0;
+
+    // Process reports
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const type = data.type as string;
+      const timestamp = data.timestamp?.toDate
+        ? data.timestamp.toDate()
+        : new Date(data.timestamp);
+
+      if (timestamp >= sevenDaysAgo) {
+        const dateStr = timestamp.toISOString().split('T')[0];
+
+        switch (type) {
+          case 'CRASH':
+            totalCrashes++;
+            crashesByDay.set(dateStr, (crashesByDay.get(dateStr) || 0) + 1);
+            break;
+          case 'BUG':
+            totalBugs++;
+            bugsByDay.set(dateStr, (bugsByDay.get(dateStr) || 0) + 1);
+            break;
+          case 'LATENCY':
+            // Count latency issues (requests >2s) like crashes/bugs
+            totalLatencyIssues++;
+            latencyIssuesByDay.set(dateStr, (latencyIssuesByDay.get(dateStr) || 0) + 1);
+            break;
+        }
+      }
+    });
+
+    this.logger.log(
+      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}`,
+    );
+
+    return {
+      summary: {
+        crashes: totalCrashes,
+        bugs: totalBugs,
+        latencyIssues: totalLatencyIssues,
+      },
+      dates,
+      crashes: dates.map((d) => crashesByDay.get(d) || 0),
+      bugs: dates.map((d) => bugsByDay.get(d) || 0),
+      latencyIssues: dates.map((d) => latencyIssuesByDay.get(d) || 0),
+    };
+  }
+>>>>>>> d82f8889c7b4404a31ede2271d0af834fb6b12c0
 }

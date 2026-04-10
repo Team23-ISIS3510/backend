@@ -6,7 +6,7 @@ import * as admin from 'firebase-admin';
 @Injectable()
 export class TutoringSessionRepository {
   private readonly logger = new Logger(TutoringSessionRepository.name);
-  private readonly COLLECTION = 'tutoringSessions';
+  private readonly COLLECTION = 'tutoring_sessions';
   // Standard collection name per project conventions
   // should be `tutoring_sessions`
   private readonly STANDARD_COLLECTION = 'tutoring_sessions';
@@ -401,8 +401,6 @@ export class TutoringSessionRepository {
       updatedAt: data.updatedAt?.toDate(),
     } as TutoringSession;
   }
-<<<<<<< Updated upstream
-=======
 
   async findUpcomingSessionsByTutor(tutorId: string, limit: number = 2): Promise<TutoringSession[]> {
     try {
@@ -583,6 +581,5 @@ export class TutoringSessionRepository {
       throw error;
     }
   }
->>>>>>> Stashed changes
 }
 
