@@ -179,26 +179,15 @@ export class AnalyticsController {
    * Returns occupancy and demand analysis for a specific tutor (last 2 years)
    * Breaks down metrics by subject for individual tutor insight
    * 
-<<<<<<< HEAD
-   * @param tutorId Firebase UID of the tutor
-=======
    * @param tutorId Firebase UID OR email of the tutor (auto-resolves email to UID)
->>>>>>> d82f8889c7b4404a31ede2271d0af834fb6b12c0
    * @returns Array of metrics for each subject this tutor teaches
    */
   @Get('tutor-occupancy/:tutorId')
   @ApiOperation({
-<<<<<<< HEAD
-    summary: 'BQ4: Tutor occupancy analysis by tutor ID',
-    description:
-      'Calculates session volume vs available hours for a specific tutor across all subjects. ' +
-      'Shows demand metrics broken down by subject.',
-=======
     summary: 'BQ4: Tutor occupancy analysis by tutor ID or email',
     description:
       'Calculates session volume vs available hours for a specific tutor across all subjects. ' +
       'Shows demand metrics broken down by subject. Accepts both Firebase UID and email address.',
->>>>>>> d82f8889c7b4404a31ede2271d0af834fb6b12c0
   })
   @ApiResponse({
     status: 200,
@@ -206,10 +195,7 @@ export class AnalyticsController {
     type: [TutorOccupancyDto],
   })
   @ApiResponse({ status: 400, description: 'Missing or invalid tutorId' })
-<<<<<<< HEAD
-=======
   @ApiResponse({ status: 404, description: 'Tutor not found' })
->>>>>>> d82f8889c7b4404a31ede2271d0af834fb6b12c0
   @ApiResponse({ status: 500, description: 'Error calculating analytics' })
   async getTutorOccupancyByTutorId(
     @Param('tutorId') tutorId: string,
@@ -224,14 +210,6 @@ export class AnalyticsController {
         throw new BadRequestException('Parameter "tutorId" is required');
       }
 
-<<<<<<< HEAD
-      this.logger.log(`BQ4: Fetching tutor occupancy analytics for tutorId: ${tutorId}`);
-      const data = await this.analyticsService.getTutorOccupancyByTutorId(tutorId.trim());
-
-      return {
-        success: true,
-        tutorId: tutorId.trim(),
-=======
       let resolvedTutorId = tutorId.trim();
 
       // If tutorId looks like an email, resolve it to Firebase UID
@@ -255,7 +233,6 @@ export class AnalyticsController {
       return {
         success: true,
         tutorId: resolvedTutorId,
->>>>>>> d82f8889c7b4404a31ede2271d0af834fb6b12c0
         count: data.length,
         data,
       };
@@ -264,8 +241,6 @@ export class AnalyticsController {
       throw error;
     }
   }
-<<<<<<< HEAD
-=======
 
   /**
    * GET /analytics/returning-tutor?student=<uid>&course=<courseId>
@@ -614,5 +589,4 @@ export class AnalyticsController {
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
   }
->>>>>>> d82f8889c7b4404a31ede2271d0af834fb6b12c0
 }

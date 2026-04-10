@@ -811,11 +811,6 @@ export class AnalyticsService {
         this.logger.warn('BQ4: Error converting number to Date:', error);
       }
     }
-<<<<<<< HEAD
-
-    return null;
-  }
-=======
     return null;
   }
 
@@ -1044,5 +1039,4 @@ export class AnalyticsService {
       latencyIssues: dates.map((d) => latencyIssuesByDay.get(d) || 0),
     };
   }
->>>>>>> d82f8889c7b4404a31ede2271d0af834fb6b12c0
 }
