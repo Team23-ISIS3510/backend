@@ -785,6 +785,75 @@ export class AnalyticsService {
   }
 
   /**
+   * BQ5: Get booking success rate data
+   * Instant booking = tutorApprovalStatus === 'approved' AND status === 'scheduled'
+   * Returns summary stats + 7-day daily breakdown for instant vs manual bookings
+   */
+  async getBookingSuccessData(): Promise<{
+    summary: { totalBookings: number; instantConfirmations: number; successRate: number };
+    dates: string[];
+    instantByDay: number[];
+    manualByDay: number[];
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('tutoring_sessions').get();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dates: string[] = [];
+    const instantByDay = new Map<string, number>();
+    const manualByDay = new Map<string, number>();
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      dates.push(dateStr);
+      instantByDay.set(dateStr, 0);
+      manualByDay.set(dateStr, 0);
+    }
+
+    let totalBookings = 0;
+    let instantConfirmations = 0;
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      totalBookings++;
+
+      const isInstant =
+        data.tutorApprovalStatus === 'approved' && data.status === 'scheduled';
+      if (isInstant) instantConfirmations++;
+
+      const createdAt = this.safeToDate(data.createdAt);
+      if (createdAt && createdAt >= sevenDaysAgo) {
+        const dateStr = createdAt.toISOString().split('T')[0];
+        if (isInstant) {
+          instantByDay.set(dateStr, (instantByDay.get(dateStr) || 0) + 1);
+        } else {
+          manualByDay.set(dateStr, (manualByDay.get(dateStr) || 0) + 1);
+        }
+      }
+    });
+
+    const successRate =
+      totalBookings > 0
+        ? Math.round((instantConfirmations / totalBookings) * 10000) / 100
+        : 0;
+
+    this.logger.log(
+      `BQ5: Total: ${totalBookings}, Instant: ${instantConfirmations}, Rate: ${successRate}%`,
+    );
+
+    return {
+      summary: { totalBookings, instantConfirmations, successRate },
+      dates,
+      instantByDay: dates.map((d) => instantByDay.get(d) || 0),
+      manualByDay: dates.map((d) => manualByDay.get(d) || 0),
+    };
+  }
+
+  /**
    * BQ1: Save a bug report to Firestore
    * @param type Report type (CRASH, BUG, or LATENCY)
    * @param message Error message or description

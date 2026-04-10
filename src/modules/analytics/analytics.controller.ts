@@ -371,8 +371,11 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const metrics = await this.analyticsService.getDashboardData();
-    
+    const [metrics, bq5] = await Promise.all([
+      this.analyticsService.getDashboardData(),
+      this.analyticsService.getBookingSuccessData(),
+    ]);
+
     const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -390,6 +393,8 @@ export class AnalyticsController {
       --crash: #ef4444;
       --bug: #f59e0b;
       --latency: #8b5cf6;
+      --instant: #10b981;
+      --manual: #6b7280;
     }
     
     * {
@@ -465,6 +470,25 @@ export class AnalyticsController {
     .stat-card.latency .stat-value {
       color: var(--latency);
     }
+
+    .stat-card.instant .stat-value {
+      color: var(--instant);
+    }
+
+    .stat-card.rate .stat-value {
+      color: var(--instant);
+    }
+
+    .section {
+      margin-top: 3rem;
+    }
+
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0 0 1.5rem 0;
+      color: var(--text);
+    }
     
     .chart-card {
       background: var(--card);
@@ -513,6 +537,31 @@ export class AnalyticsController {
       <h2>Issues Over Time</h2>
       <canvas id="stabilityChart"></canvas>
     </div>
+
+    <!-- BQ5: Instant Booking Success Rate -->
+    <div class="section">
+      <h1 class="section-title">Instant Booking Success Rate</h1>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${bq5.summary.totalBookings}</div>
+          <div class="stat-label">Total Bookings</div>
+        </div>
+        <div class="stat-card instant">
+          <div class="stat-value">${bq5.summary.instantConfirmations}</div>
+          <div class="stat-label">Instant Confirmations</div>
+        </div>
+        <div class="stat-card rate">
+          <div class="stat-value">${bq5.summary.successRate}%</div>
+          <div class="stat-label">Success Rate</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>Instant vs Manual Bookings (Last 7 Days)</h2>
+        <canvas id="bookingChart"></canvas>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -526,6 +575,9 @@ export class AnalyticsController {
     };
     
     const dates = ${JSON.stringify(metrics.dates)};
+    const bq5Dates = ${JSON.stringify(bq5.dates)};
+    const instantByDay = ${JSON.stringify(bq5.instantByDay)};
+    const manualByDay = ${JSON.stringify(bq5.manualByDay)};
     const crashes = ${JSON.stringify(metrics.crashes)};
     const bugs = ${JSON.stringify(metrics.bugs)};
     const latencyIssues = ${JSON.stringify(metrics.latencyIssues)};
@@ -578,6 +630,43 @@ export class AnalyticsController {
             beginAtZero: true,
             ticks: { stepSize: 1 },
             title: { display: true, text: 'Issue Count' }
+          }
+        }
+      }
+    });
+    // BQ5: Booking chart
+    new Chart(document.getElementById('bookingChart'), {
+      type: 'bar',
+      data: {
+        labels: bq5Dates,
+        datasets: [
+          {
+            label: 'Instant Confirmations',
+            data: instantByDay,
+            backgroundColor: 'rgba(16, 185, 129, 0.8)',
+            borderColor: '#10b981',
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+          {
+            label: 'Manual / Other',
+            data: manualByDay,
+            backgroundColor: 'rgba(107, 114, 128, 0.4)',
+            borderColor: '#6b7280',
+            borderWidth: 1,
+            borderRadius: 4,
+          }
+        ]
+      },
+      options: {
+        ...chartOptions,
+        scales: {
+          x: { stacked: true },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: { stepSize: 1 },
+            title: { display: true, text: 'Bookings' }
           }
         }
       }
