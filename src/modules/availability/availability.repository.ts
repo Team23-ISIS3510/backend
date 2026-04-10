@@ -417,4 +417,52 @@ export class AvailabilityRepository {
       throw error;
     }
   }
+
+  /**
+   * Get all availabilities for a tutor in the last 2 years
+   * Used by analytics for occupancy calculations
+   */
+  async getTutorAvailabilitiesLast2Years(tutorId: string): Promise<Availability[]> {
+    try {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db
+        .collection(this.COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      const availabilities: Availability[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const startDate = this.safeToDate(data.startDateTime);
+        
+        if (startDate && startDate >= twoYearsAgo) {
+          availabilities.push({
+            id: doc.id,
+            tutorId: data.tutorId,
+            title: data.title,
+            location: data.location,
+            startDateTime: startDate,
+            endDateTime: this.safeToDate(data.endDateTime),
+            googleEventId: data.googleEventId,
+            eventLink: data.eventLink || data.htmlLink || null,
+            recurring: data.recurring,
+            recurrenceRule: data.recurrenceRule,
+            sourceCalendarId: data.sourceCalendarId,
+            sourceCalendarName: data.sourceCalendarName,
+            course: data.course,
+            createdAt: this.safeToDate(data.createdAt),
+            updatedAt: this.safeToDate(data.updatedAt),
+          } as Availability);
+        }
+      });
+
+      return availabilities;
+    } catch (error) {
+      this.logger.error(`Error finding availabilities for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
 }

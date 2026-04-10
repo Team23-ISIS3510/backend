@@ -128,7 +128,6 @@ export class AnalyticsController {
   }
 
   /**
-
    * BQ4: GET /analytics/tutor-occupancy
    * 
    * Returns tutor occupancy and demand analysis for the last 2 years

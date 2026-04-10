@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
+import { OccupancyRepository } from './repositories/occupancy.repository';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { DemandMetricsDto } from './dto/demand-metrics.dto';
 
@@ -34,7 +35,136 @@ export class AnalyticsService {
   constructor(
     private readonly firebaseService: FirebaseService,
     private readonly availabilityRepository: AvailabilityRepository,
+    private readonly occupancyRepository: OccupancyRepository,
   ) {}
+
+  /**
+   * Get tutor occupancy from pre-calculated storage layer
+   * This reads from the occupancy collection instead of calculating on-the-fly
+   * API endpoint: GET /analytics/tutor-occupancy/:tutorId
+   */
+  async getTutorOccupancy(tutorId: string): Promise<TutorOccupancyDto> {
+    try {
+      this.logger.log(`BQ4: Reading tutor occupancy for ${tutorId} from storage layer`);
+
+      // Get all occupancy records for this tutor
+      const occupancyRecords = await this.occupancyRepository.findByTutor(tutorId);
+
+      if (!occupancyRecords || occupancyRecords.length === 0) {
+        this.logger.warn(`No occupancy records found for tutor ${tutorId}`);
+        return {
+          tutorId,
+          subject: 'General',
+          totalSessions: 0,
+          totalAvailableHours: 0,
+          sessionsPerHour: 0,
+          occupancyRate: 0,
+          highDemand: {
+            occupancyRate: 0,
+            sessionsPerHour: 0,
+            totalSessions: 0,
+            totalHoursOccupied: 0,
+          },
+          normalDemand: {
+            occupancyRate: 0,
+            sessionsPerHour: 0,
+            totalSessions: 0,
+            totalHoursOccupied: 0,
+          },
+        };
+      }
+
+      // Use the first occupancy record (primary subject)
+      const primaryOccupancy = occupancyRecords[0];
+
+      // Calculate aggregated high-demand and normal demands across all subjects
+      const totalHighDemandSessions = occupancyRecords.reduce(
+        (sum, o) => sum + o.highDemandSessions,
+        0,
+      );
+      const totalHighDemandHours = occupancyRecords.reduce(
+        (sum, o) => sum + o.highDemandSessionHours,
+        0,
+      );
+      const totalNormalDemandSessions = occupancyRecords.reduce(
+        (sum, o) => sum + o.normalDemandSessions,
+        0,
+      );
+      const totalNormalDemandHours = occupancyRecords.reduce(
+        (sum, o) => sum + o.normalDemandSessionHours,
+        0,
+      );
+
+      // Calculate aggregated availability for high and normal demand periods
+      const totalHighDemandAvailableHours = occupancyRecords.reduce(
+        (sum, o) => {
+          const allAvailHours = o.totalAvailableHours;
+          const normalHours = o.normalDemandSessionHours;
+          const estimatedHighDemandHours = allAvailHours - normalHours;
+          return sum + estimatedHighDemandHours;
+        },
+        0,
+      );
+
+      const totalNormalDemandAvailableHours = occupancyRecords.reduce(
+        (sum, o) => {
+          return sum + o.totalAvailableHours * 0.7; // Estimate: 70% is normal demand
+        },
+        0,
+      );
+
+      // Create response DTO
+      const dto: TutorOccupancyDto = {
+        tutorId,
+        subject: primaryOccupancy.subjectName, // Primary subject
+        totalSessions: occupancyRecords.reduce((sum, o) => sum + o.totalSessions, 0),
+        totalAvailableHours: occupancyRecords.reduce(
+          (sum, o) => sum + o.totalAvailableHours,
+          0,
+        ),
+        sessionsPerHour:
+          occupancyRecords.reduce((sum, o) => sum + o.sessionsPerHour * o.totalAvailableHours, 0) /
+          occupancyRecords.reduce((sum, o) => sum + o.totalAvailableHours, 0),
+        occupancyRate:
+          occupancyRecords.reduce(
+            (sum, o) => sum + o.occupancyRate * o.totalAvailableHours,
+            0,
+          ) / occupancyRecords.reduce((sum, o) => sum + o.totalAvailableHours, 0),
+        highDemand: {
+          occupancyRate:
+            totalHighDemandAvailableHours > 0
+              ? (totalHighDemandHours / totalHighDemandAvailableHours) * 100
+              : 0,
+          sessionsPerHour:
+            totalHighDemandAvailableHours > 0
+              ? totalHighDemandSessions / totalHighDemandAvailableHours
+              : 0,
+          totalSessions: totalHighDemandSessions,
+          totalHoursOccupied: totalHighDemandHours,
+        } as DemandMetricsDto,
+        normalDemand: {
+          occupancyRate:
+            totalNormalDemandAvailableHours > 0
+              ? (totalNormalDemandHours / totalNormalDemandAvailableHours) * 100
+              : 0,
+          sessionsPerHour:
+            totalNormalDemandAvailableHours > 0
+              ? totalNormalDemandSessions / totalNormalDemandAvailableHours
+              : 0,
+          totalSessions: totalNormalDemandSessions,
+          totalHoursOccupied: totalNormalDemandHours,
+        } as DemandMetricsDto,
+      };
+
+      this.logger.log(
+        `BQ4: Occupancy for tutor ${tutorId}: ${dto.occupancyRate.toFixed(2)}%`,
+      );
+      return dto;
+    } catch (error) {
+      this.logger.error(`BQ4: Error reading occupancy for ${tutorId}:`, error);
+      throw error;
+    }
+  }
 
   /**
    * Returns tutors for a given course that:
