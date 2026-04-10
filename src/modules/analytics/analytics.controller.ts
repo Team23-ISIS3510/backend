@@ -5,6 +5,7 @@ import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './
 import { AnalyticsBookingService } from './analytics-booking.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { CreateBugReportDto } from './dto/bug-report.dto';
+import { CreateCarouselEventDto } from './dto/carousel-event.dto';
 import { UserService } from '../user/user.service';
 
 class AvailableTutorsResponseDto {
@@ -354,6 +355,27 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ2: POST /analytics/event
+   * Receives carousel interaction events from the Flutter app.
+   */
+  @Post('event')
+  @ApiOperation({
+    summary: 'BQ2: Track a carousel interaction event',
+    description: 'Stores results_shown, tutor_clicked, and booking_completed events for the tutor carousel.',
+  })
+  @ApiResponse({ status: 201, description: 'Event saved successfully' })
+  async createCarouselEvent(@Body() dto: CreateCarouselEventDto) {
+    await this.analyticsService.saveCarouselEvent(dto.event, dto.courseId, {
+      tutorId: dto.tutorId,
+      tutorRating: dto.tutorRating,
+      resultCount: dto.resultCount,
+      countdownMinutes: dto.countdownMinutes,
+      timestamp: dto.timestamp ? new Date(dto.timestamp) : new Date(),
+    });
+    return { success: true };
+  }
+
+  /**
    * BQ1: GET /analytics/dashboard
    * 
    * Returns an HTML dashboard with minimalist design visualizing:
@@ -370,9 +392,10 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5] = await Promise.all([
+    const [metrics, bq5, bq2] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
+      this.analyticsService.getBQ2DashboardData(),
     ]);
 
     const html = `
@@ -394,6 +417,9 @@ export class AnalyticsController {
       --latency: #8b5cf6;
       --instant: #10b981;
       --manual: #6b7280;
+      --impression: #3b82f6;
+      --click: #f59e0b;
+      --booking: #10b981;
     }
     
     * {
@@ -561,6 +587,46 @@ export class AnalyticsController {
         <canvas id="bookingChart"></canvas>
       </div>
     </div>
+
+    <!-- BQ2: Tutor Carousel Performance -->
+    <div class="section">
+      <h1 class="section-title">Tutor Carousel Performance (BQ2)</h1>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--impression)">${bq2.summary.ctr}%</div>
+          <div class="stat-label">Click-Through Rate</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--booking)">${bq2.summary.conversionRate}%</div>
+          <div class="stat-label">Booking Conversion</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--crash)">${bq2.summary.emptyResultRate}%</div>
+          <div class="stat-label">Empty Result Rate</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--booking)">${bq2.summary.totalBookings}</div>
+          <div class="stat-label">Carousel Bookings</div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:1.5rem">
+        <h2>Impressions · Clicks · Bookings (Last 7 Days)</h2>
+        <canvas id="carouselFunnelChart"></canvas>
+      </div>
+
+      <div class="stats-grid">
+        <div class="chart-card">
+          <h2>Top Clicked Tutors</h2>
+          <canvas id="topTutorsChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h2>Click Timing (slot countdown)</h2>
+          <canvas id="countdownChart"></canvas>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -669,6 +735,44 @@ export class AnalyticsController {
           }
         }
       }
+    });
+    // BQ2: Carousel funnel
+    const bq2Dates = ${JSON.stringify(bq2.dates)};
+    const bq2Impressions = ${JSON.stringify(bq2.impressions)};
+    const bq2Clicks = ${JSON.stringify(bq2.clicks)};
+    const bq2Bookings = ${JSON.stringify(bq2.bookings)};
+    const topTutors = ${JSON.stringify(bq2.topTutors)};
+    const countdownBuckets = ${JSON.stringify(bq2.countdownBuckets)};
+
+    new Chart(document.getElementById('carouselFunnelChart'), {
+      type: 'line',
+      data: {
+        labels: bq2Dates,
+        datasets: [
+          { label: 'Impressions', data: bq2Impressions, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointBackgroundColor: '#3b82f6' },
+          { label: 'Clicks', data: bq2Clicks, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointBackgroundColor: '#f59e0b' },
+          { label: 'Bookings', data: bq2Bookings, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointBackgroundColor: '#10b981' }
+        ]
+      },
+      options: { ...chartOptions, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Events' } } } }
+    });
+
+    new Chart(document.getElementById('topTutorsChart'), {
+      type: 'bar',
+      data: {
+        labels: topTutors.map(t => t.tutorId.slice(0, 8) + '…'),
+        datasets: [{ label: 'Clicks', data: topTutors.map(t => t.clicks), backgroundColor: 'rgba(245,158,11,0.8)', borderColor: '#f59e0b', borderWidth: 1, borderRadius: 4 }]
+      },
+      options: { ...chartOptions, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Clicks' } } } }
+    });
+
+    new Chart(document.getElementById('countdownChart'), {
+      type: 'bar',
+      data: {
+        labels: countdownBuckets.map(b => b.label),
+        datasets: [{ label: 'Clicks', data: countdownBuckets.map(b => b.count), backgroundColor: 'rgba(59,130,246,0.8)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 4 }]
+      },
+      options: { ...chartOptions, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Clicks' } } } }
     });
   </script>
 </body>
