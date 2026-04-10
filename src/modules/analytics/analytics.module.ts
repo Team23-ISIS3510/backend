@@ -1,13 +1,42 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 import { FirebaseModule } from '../firebase/firebase.module';
 import { AvailabilityModule } from '../availability/availability.module';
+<<<<<<< Updated upstream
 
 @Module({
   imports: [FirebaseModule, AvailabilityModule],
   controllers: [AnalyticsController],
   providers: [AnalyticsService],
   exports: [AnalyticsService],
+=======
+import { UserModule } from '../user/user.module';
+import { TutoringSessionModule } from '../tutoring-session/tutoring-session.module';
+import { OccupancyRepository } from './repositories/occupancy.repository';
+import { AnalyticsOccupancyUpdateService } from './analytics-occupancy-update.service';
+import { TutoringSessionOccupancyUpdateService } from '../tutoring-session/tutoring-session-occupancy-update.service';
+import { AvailabilityOccupancyUpdateService } from '../availability/availability-occupancy-update.service';
+
+@Module({
+  imports: [FirebaseModule, forwardRef(() => AvailabilityModule), UserModule, forwardRef(() => TutoringSessionModule)],
+  controllers: [AnalyticsController],
+  providers: [
+    AnalyticsService,
+    AnalyticsBookingService,
+    OccupancyRepository,
+    AnalyticsOccupancyUpdateService,
+    TutoringSessionOccupancyUpdateService,
+    AvailabilityOccupancyUpdateService,
+  ],
+  exports: [
+    AnalyticsService,
+    AnalyticsBookingService,
+    OccupancyRepository,
+    AnalyticsOccupancyUpdateService,
+    TutoringSessionOccupancyUpdateService,
+    AvailabilityOccupancyUpdateService,
+  ],
+>>>>>>> Stashed changes
 })
 export class AnalyticsModule {}

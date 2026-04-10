@@ -6,6 +6,7 @@ import { Availability } from '../availability/entities/availability.entity';
 import { CalendarService } from '../../modules/calendar/calendar.service';
 import { SlotService } from '../../modules/availability/slot.service';
 import { Slot } from '../../modules/availability/slot.service';
+import { AvailabilityOccupancyUpdateService } from './availability-occupancy-update.service';
 
 @Injectable()
 export class AvailabilityService {
@@ -15,6 +16,7 @@ export class AvailabilityService {
     private readonly availabilityRepository: AvailabilityRepository,
     private readonly calendarService: CalendarService,
     private readonly slotService: SlotService,
+    private readonly occupancyUpdateService: AvailabilityOccupancyUpdateService,
   ) {}
 
   async getAvailabilityById(id: string): Promise<AvailabilityResponseDto | null> {
@@ -672,6 +674,18 @@ export class AvailabilityService {
       const availabilityId = await this.availabilityRepository.save(createdEvent.id ?? undefined, availabilityData);
 
       this.logger.log(`Created availability event: ${createdEvent.id}`);
+
+      // === TRIGGER OCCUPANCY UPDATE ===
+      // When a new availability is created, recalculate all occupancies for this tutor
+      try {
+        await this.occupancyUpdateService.onAvailabilityCreated(tutorId);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to update occupancy for availability ${availabilityId}. Continuing anyway.`,
+          error,
+        );
+        // Don't throw - availability creation succeeded, occupancy update is secondary
+      }
 
       return {
         event: createdEvent,

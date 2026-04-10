@@ -401,5 +401,188 @@ export class TutoringSessionRepository {
       updatedAt: data.updatedAt?.toDate(),
     } as TutoringSession;
   }
+<<<<<<< Updated upstream
+=======
+
+  async findUpcomingSessionsByTutor(tutorId: string, limit: number = 2): Promise<TutoringSession[]> {
+    try {
+      const now = new Date();
+      const snapshot = await this.firebaseService
+        .getFirestore()
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      const sessions: TutoringSession[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const session = this.mapDocToSession(doc.id, data);
+        // Filter only future sessions (scheduledStart > now)
+        if (session.scheduledStart && new Date(session.scheduledStart) > now) {
+          sessions.push(session);
+        }
+      });
+
+      // Sort by scheduledStart ascending (nearest first)
+      sessions.sort((a, b) => {
+        const dateA = new Date(a.scheduledStart).getTime();
+        const dateB = new Date(b.scheduledStart).getTime();
+        return dateA - dateB;
+      });
+
+      return sessions.slice(0, limit);
+    } catch (error) {
+      this.logger.error('Error finding upcoming sessions by tutor:', error);
+      throw error;
+    }
+  }
+
+  async findPreviousSessionsByTutor(tutorId: string, limit: number = 2): Promise<TutoringSession[]> {
+    try {
+      const now = new Date();
+      const snapshot = await this.firebaseService
+        .getFirestore()
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      const sessions: TutoringSession[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const session = this.mapDocToSession(doc.id, data);
+        // Filter only past sessions (scheduledStart < now)
+        if (session.scheduledStart && new Date(session.scheduledStart) < now) {
+          sessions.push(session);
+        }
+      });
+
+      // Sort by scheduledStart descending (most recent first)
+      sessions.sort((a, b) => {
+        const dateA = new Date(a.scheduledStart).getTime();
+        const dateB = new Date(b.scheduledStart).getTime();
+        return dateB - dateA;
+      });
+
+      return sessions.slice(0, limit);
+    } catch (error) {
+      this.logger.error('Error finding previous sessions by tutor:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all sessions for a tutor in the last 2 years
+   * Used by analytics for occupancy calculations (searches both collections)
+   */
+  async getTutorSessionsLast2Years(tutorId: string): Promise<TutoringSession[]> {
+    try {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+      const db = this.firebaseService.getFirestore();
+      const sessions: TutoringSession[] = [];
+
+      // Search in standard collection
+      const snapshot1 = await db
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      snapshot1.forEach(doc => {
+        const session = this.mapDocToSession(doc.id, doc.data());
+        if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+          sessions.push(session);
+        }
+      });
+
+      // Also search in alternative collection name (tutoringSessions) for legacy data
+      try {
+        const snapshot2 = await db
+          .collection('tutoringSessions')
+          .where('tutorId', '==', tutorId)
+          .get();
+
+        snapshot2.forEach(doc => {
+          if (!sessions.find(s => s.id === doc.id)) {
+            const session = this.mapDocToSession(doc.id, doc.data());
+            if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+              sessions.push(session);
+            }
+          }
+        });
+      } catch (e) {
+        // Collection might not exist, continue
+      }
+
+      return sessions;
+    } catch (error) {
+      this.logger.error(`Error fetching sessions for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all sessions for a tutor-subject combination in the last 2 years
+   * Used by analytics for occupancy calculations (searches both collections)
+   */
+  async getTutorSubjectSessionsLast2Years(
+    tutorId: string,
+    subjectId: string,
+  ): Promise<TutoringSession[]> {
+    try {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+      const db = this.firebaseService.getFirestore();
+      const sessions: TutoringSession[] = [];
+
+      // Search in standard collection
+      const snapshot1 = await db
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      snapshot1.forEach(doc => {
+        const data = doc.data();
+        if (data.subject === subjectId || data.subjectId === subjectId) {
+          const session = this.mapDocToSession(doc.id, data);
+          if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+            sessions.push(session);
+          }
+        }
+      });
+
+      // Also search in alternative collection name (tutoringSessions) for legacy data
+      try {
+        const snapshot2 = await db
+          .collection('tutoringSessions')
+          .where('tutorId', '==', tutorId)
+          .get();
+
+        snapshot2.forEach(doc => {
+          if (!sessions.find(s => s.id === doc.id)) {
+            const data = doc.data();
+            if (data.subject === subjectId || data.subjectId === subjectId) {
+              const session = this.mapDocToSession(doc.id, data);
+              if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+                sessions.push(session);
+              }
+            }
+          }
+        });
+      } catch (e) {
+        // Collection might not exist, continue
+      }
+
+      return sessions;
+    } catch (error) {
+      this.logger.error(
+        `Error fetching sessions for tutor ${tutorId}, subject ${subjectId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+>>>>>>> Stashed changes
 }
 

@@ -7,6 +7,7 @@ import { UserService } from '../user/user.service';
 import { TutoringSession, TutoringSessionReview } from './entities/tutoring-session.entity';
 import { Slot } from '../availability/slot.service';
 import { CourseHelper } from '../../common/helpers/course.helper';
+import { TutoringSessionOccupancyUpdateService } from './tutoring-session-occupancy-update.service';
 
 @Injectable()
 export class TutoringSessionService {
@@ -18,6 +19,7 @@ export class TutoringSessionService {
     private readonly calicoCalendarService: CalicoCalendarService,
     private readonly notificationService: NotificationService,
     private readonly userService: UserService,
+    private readonly occupancyUpdateService: TutoringSessionOccupancyUpdateService,
   ) {}
 
   async getSessionById(id: string): Promise<TutoringSession> {
@@ -103,7 +105,27 @@ export class TutoringSessionService {
 
     const id = await this.sessionRepository.save(undefined, finalData);
     this.logger.log(`Tutoring session created with ID: ${id}, Status: ${finalData.status}`);
-    return await this.getSessionById(id);
+    const session = await this.getSessionById(id);
+
+    // === TRIGGER OCCUPANCY UPDATE ===
+    // When a new session is created, recalculate occupancy for this tutor-subject
+    if (session.tutorId && session.courseId) {
+      try {
+        await this.occupancyUpdateService.onSessionCreated(
+          session.tutorId,
+          session.courseId,
+          session.course || session.courseId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to update occupancy for session ${id}. Continuing anyway.`,
+          error,
+        );
+        // Don't throw - session creation succeeded, occupancy update is secondary
+      }
+    }
+
+    return session;
   }
 
   async updateSession(id: string, sessionData: Partial<TutoringSession>): Promise<TutoringSession> {
