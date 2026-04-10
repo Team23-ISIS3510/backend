@@ -336,6 +336,15 @@ export class AnalyticsController {
       dto.message,
       dto.deviceModel,
       timestamp,
+      {
+        feature: dto.feature,
+        action: dto.action,
+        networkType: dto.networkType,
+        endpoint: dto.endpoint,
+        method: dto.method,
+        durationMs: dto.durationMs,
+        statusCode: dto.statusCode,
+      },
     );
 
     return {
@@ -348,26 +357,21 @@ export class AnalyticsController {
   /**
    * BQ1: GET /analytics/dashboard
    * 
-   * Returns an HTML dashboard with Chart.js visualizations
-   * Shows pie chart of bug types and trend line of last 7 days
+   * Returns an HTML dashboard with minimalist design visualizing:
+   * - System Stability: Crashes, User-Reported Bugs, and Latency Issues (7-day line chart)
+   * 
+   * Latency Issue: API request that exceeded 2-second threshold
    */
   @Get('dashboard')
   @ApiOperation({
-    summary: 'BQ1: Bug report analytics dashboard',
-    description: 'Returns an HTML page with Chart.js visualizations showing bug counts by type and 7-day trend',
+    summary: 'BQ1: System Stability Dashboard',
+    description: 'Minimalist dashboard with 7-day trend visualization for crashes, bugs, and slow API requests (>2s)',
   })
   @ApiResponse({ status: 200, description: 'HTML dashboard page', content: { 'text/html': {} } })
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const data = await this.analyticsService.getDashboardData();
-    
-    // Prepare data for Chart.js
-    const pieLabels = data.countsByType.map(item => item.type);
-    const pieCounts = data.countsByType.map(item => item.count);
-    
-    const trendLabels = data.last7DaysTrend.map(item => item.date);
-    const trendCounts = data.last7DaysTrend.map(item => item.count);
+    const metrics = await this.analyticsService.getDashboardData();
     
     const html = `
 <!DOCTYPE html>
@@ -375,169 +379,205 @@ export class AnalyticsController {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BQ1 Analytics Dashboard</title>
+  <title>System Stability</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
+    :root {
+      --bg: #f4f4f5;
+      --card: #ffffff;
+      --text: #18181b;
+      --muted: #71717a;
+      --crash: #ef4444;
+      --bug: #f59e0b;
+      --latency: #8b5cf6;
     }
+    
+    * {
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 2rem;
+      line-height: 1.5;
+    }
+    
     .container {
-      max-width: 1200px;
+      max-width: 1000px;
       margin: 0 auto;
     }
+    
     h1 {
-      color: white;
-      text-align: center;
-      margin-bottom: 40px;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+      font-size: 1.875rem;
+      font-weight: 700;
+      margin: 0 0 2rem 0;
+      color: var(--text);
     }
-    .charts {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 30px;
-      margin-bottom: 40px;
-    }
-    .chart-container {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-    }
+    
     h2 {
-      color: #333;
-      margin-top: 0;
-      text-align: center;
-      font-size: 1.3em;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin: 0 0 1rem 0;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
-    .stats {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    
+    .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
     }
-    .stat-item {
-      text-align: center;
-      padding: 15px;
+    
+    .stat-card {
+      background: var(--card);
+      padding: 1.5rem;
       border-radius: 8px;
-      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      border: 1px solid #e4e4e7;
     }
+    
     .stat-value {
-      font-size: 2em;
-      font-weight: bold;
-      color: #667eea;
+      font-size: 2.25rem;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 0.5rem;
     }
+    
     .stat-label {
-      color: #666;
-      font-size: 0.9em;
-      margin-top: 5px;
+      font-size: 0.875rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
+    
+    .stat-card.crashes .stat-value {
+      color: var(--crash);
+    }
+    
+    .stat-card.bugs .stat-value {
+      color: var(--bug);
+    }
+    
+    .stat-card.latency .stat-value {
+      color: var(--latency);
+    }
+    
+    .chart-card {
+      background: var(--card);
+      padding: 1.5rem;
+      border-radius: 8px;
+      border: 1px solid #e4e4e7;
+    }
+    
+    canvas {
+      max-height: 350px;
+    }
+    
     @media (max-width: 768px) {
-      .charts {
-        grid-template-columns: 1fr;
+      body {
+        padding: 1rem;
+      }
+      
+      h1 {
+        font-size: 1.5rem;
       }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>🐛 BQ1 Telemetry Dashboard</h1>
+    <h1>7-Day System Stability</h1>
     
-    <div class="stats">
-      ${data.countsByType.map(item => `
-        <div class="stat-item">
-          <div class="stat-value">${item.count}</div>
-          <div class="stat-label">${item.type}</div>
-        </div>
-      `).join('')}
-      <div class="stat-item">
-        <div class="stat-value">${data.countsByType.reduce((sum, item) => sum + item.count, 0)}</div>
-        <div class="stat-label">TOTAL</div>
+    <!-- Summary Stats -->
+    <div class="stats-grid">
+      <div class="stat-card crashes">
+        <div class="stat-value">${metrics.summary.crashes}</div>
+        <div class="stat-label">Crashes</div>
+      </div>
+      <div class="stat-card bugs">
+        <div class="stat-value">${metrics.summary.bugs}</div>
+        <div class="stat-label">Reported Bugs</div>
+      </div>
+      <div class="stat-card latency">
+        <div class="stat-value">${metrics.summary.latencyIssues}</div>
+        <div class="stat-label">Slow Requests (>2s)</div>
       </div>
     </div>
     
-    <div class="charts">
-      <div class="chart-container">
-        <h2>Bug Reports by Type</h2>
-        <canvas id="pieChart"></canvas>
-      </div>
-      
-      <div class="chart-container">
-        <h2>Last 7 Days Trend</h2>
-        <canvas id="trendChart"></canvas>
-      </div>
+    <!-- Trend Chart -->
+    <div class="chart-card">
+      <h2>Issues Over Time</h2>
+      <canvas id="stabilityChart"></canvas>
     </div>
   </div>
 
   <script>
-    // Pie Chart - Bug Types
-    const pieCtx = document.getElementById('pieChart').getContext('2d');
-    new Chart(pieCtx, {
-      type: 'pie',
-      data: {
-        labels: ${JSON.stringify(pieLabels)},
-        datasets: [{
-          data: ${JSON.stringify(pieCounts)},
-          backgroundColor: [
-            'rgba(255, 99, 132, 0.8)',
-            'rgba(54, 162, 235, 0.8)',
-            'rgba(255, 206, 86, 0.8)',
-            'rgba(75, 192, 192, 0.8)',
-          ],
-          borderColor: [
-            'rgba(255, 99, 132, 1)',
-            'rgba(54, 162, 235, 1)',
-            'rgba(255, 206, 86, 1)',
-            'rgba(75, 192, 192, 1)',
-          ],
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: {
-            position: 'bottom',
-          }
-        }
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { usePointStyle: true, padding: 15 } }
       }
-    });
+    };
+    
+    const dates = ${JSON.stringify(metrics.dates)};
+    const crashes = ${JSON.stringify(metrics.crashes)};
+    const bugs = ${JSON.stringify(metrics.bugs)};
+    const latencyIssues = ${JSON.stringify(metrics.latencyIssues)};
 
-    // Line Chart - 7 Day Trend
-    const trendCtx = document.getElementById('trendChart').getContext('2d');
-    new Chart(trendCtx, {
+    // System Stability Chart
+    new Chart(document.getElementById('stabilityChart'), {
       type: 'line',
       data: {
-        labels: ${JSON.stringify(trendLabels)},
-        datasets: [{
-          label: 'Bug Reports',
-          data: ${JSON.stringify(trendCounts)},
-          borderColor: 'rgba(102, 126, 234, 1)',
-          backgroundColor: 'rgba(102, 126, 234, 0.2)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4
-        }]
+        labels: dates,
+        datasets: [
+          {
+            label: 'Crashes',
+            data: crashes,
+            borderColor: '#ef4444',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#ef4444'
+          },
+          {
+            label: 'User Bugs',
+            data: bugs,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#f59e0b'
+          },
+          {
+            label: 'Slow Requests (>2s)',
+            data: latencyIssues,
+            borderColor: '#8b5cf6',
+            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#8b5cf6'
+          }
+        ]
       },
       options: {
-        responsive: true,
-        plugins: {
-          legend: {
-            display: false
-          }
-        },
+        ...chartOptions,
         scales: {
           y: {
             beginAtZero: true,
-            ticks: {
-              stepSize: 1
-            }
+            ticks: { stepSize: 1 },
+            title: { display: true, text: 'Issue Count' }
           }
         }
       }

@@ -9,6 +9,11 @@ export interface BugReportEntity {
   deviceModel?: string;
   timestamp: Date;
   
+  // Mobile app context fields
+  feature?: string;
+  action?: string;
+  networkType?: string;
+  
   // Additional fields for LATENCY type
   endpoint?: string;
   method?: string;

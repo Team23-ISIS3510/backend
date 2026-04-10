@@ -11,11 +11,12 @@ import { FirebaseService } from '../../modules/firebase/firebase.service';
 
 /**
  * BQ1: Global interceptor that tracks API request latency
- * Automatically logs every request's duration to Firestore
+ * Only logs requests that exceed the 2-second threshold to Firestore
  */
 @Injectable()
 export class LatencyInterceptor implements NestInterceptor {
   private readonly logger = new Logger(LatencyInterceptor.name);
+  private readonly LATENCY_THRESHOLD_MS = 2000; // 2 seconds
 
   constructor(private readonly firebaseService: FirebaseService) {}
 
@@ -45,6 +46,12 @@ export class LatencyInterceptor implements NestInterceptor {
   ): Promise<void> {
     try {
       const durationMs = Date.now() - startTime;
+
+      // Only process if latency exceeds threshold
+      if (durationMs < this.LATENCY_THRESHOLD_MS) {
+        return;
+      }
+
       const db = this.firebaseService.getFirestore();
 
       // Skip logging for the dashboard endpoint to avoid recursion
@@ -62,12 +69,9 @@ export class LatencyInterceptor implements NestInterceptor {
         timestamp: new Date(),
       });
 
-      // Only log slow requests to console
-      if (durationMs > 1000) {
-        this.logger.warn(
-          `Slow request detected: ${method} ${endpoint} took ${durationMs}ms`,
-        );
-      }
+      this.logger.warn(
+        `Slow request detected: ${method} ${endpoint} took ${durationMs}ms`,
+      );
     } catch (error) {
       // Silently fail to avoid disrupting the request flow
       this.logger.error('Failed to log latency:', error);
