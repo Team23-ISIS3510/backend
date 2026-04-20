@@ -467,5 +467,119 @@ export class TutoringSessionRepository {
       throw error;
     }
   }
+
+  /**
+   * Get all sessions for a tutor in the last 2 years
+   * Used by analytics for occupancy calculations (searches both collections)
+   */
+  async getTutorSessionsLast2Years(tutorId: string): Promise<TutoringSession[]> {
+    try {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+      const db = this.firebaseService.getFirestore();
+      const sessions: TutoringSession[] = [];
+
+      // Search in standard collection
+      const snapshot1 = await db
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      snapshot1.forEach(doc => {
+        const session = this.mapDocToSession(doc.id, doc.data());
+        if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+          sessions.push(session);
+        }
+      });
+
+      // Also search in alternative collection name (tutoringSessions) for legacy data
+      try {
+        const snapshot2 = await db
+          .collection('tutoringSessions')
+          .where('tutorId', '==', tutorId)
+          .get();
+
+        snapshot2.forEach(doc => {
+          if (!sessions.find(s => s.id === doc.id)) {
+            const session = this.mapDocToSession(doc.id, doc.data());
+            if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+              sessions.push(session);
+            }
+          }
+        });
+      } catch (e) {
+        // Collection might not exist, continue
+      }
+
+      return sessions;
+    } catch (error) {
+      this.logger.error(`Error fetching sessions for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all sessions for a tutor-subject combination in the last 2 years
+   * Used by analytics for occupancy calculations (searches both collections)
+   */
+  async getTutorSubjectSessionsLast2Years(
+    tutorId: string,
+    subjectId: string,
+  ): Promise<TutoringSession[]> {
+    try {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+      const db = this.firebaseService.getFirestore();
+      const sessions: TutoringSession[] = [];
+
+      // Search in standard collection
+      const snapshot1 = await db
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      snapshot1.forEach(doc => {
+        const data = doc.data();
+        if (data.subject === subjectId || data.subjectId === subjectId) {
+          const session = this.mapDocToSession(doc.id, data);
+          if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+            sessions.push(session);
+          }
+        }
+      });
+
+      // Also search in alternative collection name (tutoringSessions) for legacy data
+      try {
+        const snapshot2 = await db
+          .collection('tutoringSessions')
+          .where('tutorId', '==', tutorId)
+          .get();
+
+        snapshot2.forEach(doc => {
+          if (!sessions.find(s => s.id === doc.id)) {
+            const data = doc.data();
+            if (data.subject === subjectId || data.subjectId === subjectId) {
+              const session = this.mapDocToSession(doc.id, data);
+              if (session && session.createdAt && new Date(session.createdAt) >= twoYearsAgo) {
+                sessions.push(session);
+              }
+            }
+          }
+        });
+      } catch (e) {
+        // Collection might not exist, continue
+      }
+
+      return sessions;
+    } catch (error) {
+      this.logger.error(
+        `Error fetching sessions for tutor ${tutorId}, subject ${subjectId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
 }
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
+import { OccupancyRepository } from './repositories/occupancy.repository';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { DemandMetricsDto } from './dto/demand-metrics.dto';
 
@@ -34,7 +35,136 @@ export class AnalyticsService {
   constructor(
     private readonly firebaseService: FirebaseService,
     private readonly availabilityRepository: AvailabilityRepository,
+    private readonly occupancyRepository: OccupancyRepository,
   ) {}
+
+  /**
+   * Get tutor occupancy from pre-calculated storage layer
+   * This reads from the occupancy collection instead of calculating on-the-fly
+   * API endpoint: GET /analytics/tutor-occupancy/:tutorId
+   */
+  async getTutorOccupancy(tutorId: string): Promise<TutorOccupancyDto> {
+    try {
+      this.logger.log(`BQ4: Reading tutor occupancy for ${tutorId} from storage layer`);
+
+      // Get all occupancy records for this tutor
+      const occupancyRecords = await this.occupancyRepository.findByTutor(tutorId);
+
+      if (!occupancyRecords || occupancyRecords.length === 0) {
+        this.logger.warn(`No occupancy records found for tutor ${tutorId}`);
+        return {
+          tutorId,
+          subject: 'General',
+          totalSessions: 0,
+          totalAvailableHours: 0,
+          sessionsPerHour: 0,
+          occupancyRate: 0,
+          highDemand: {
+            occupancyRate: 0,
+            sessionsPerHour: 0,
+            totalSessions: 0,
+            totalHoursOccupied: 0,
+          },
+          normalDemand: {
+            occupancyRate: 0,
+            sessionsPerHour: 0,
+            totalSessions: 0,
+            totalHoursOccupied: 0,
+          },
+        };
+      }
+
+      // Use the first occupancy record (primary subject)
+      const primaryOccupancy = occupancyRecords[0];
+
+      // Calculate aggregated high-demand and normal demands across all subjects
+      const totalHighDemandSessions = occupancyRecords.reduce(
+        (sum, o) => sum + o.highDemandSessions,
+        0,
+      );
+      const totalHighDemandHours = occupancyRecords.reduce(
+        (sum, o) => sum + o.highDemandSessionHours,
+        0,
+      );
+      const totalNormalDemandSessions = occupancyRecords.reduce(
+        (sum, o) => sum + o.normalDemandSessions,
+        0,
+      );
+      const totalNormalDemandHours = occupancyRecords.reduce(
+        (sum, o) => sum + o.normalDemandSessionHours,
+        0,
+      );
+
+      // Calculate aggregated availability for high and normal demand periods
+      const totalHighDemandAvailableHours = occupancyRecords.reduce(
+        (sum, o) => {
+          const allAvailHours = o.totalAvailableHours;
+          const normalHours = o.normalDemandSessionHours;
+          const estimatedHighDemandHours = allAvailHours - normalHours;
+          return sum + estimatedHighDemandHours;
+        },
+        0,
+      );
+
+      const totalNormalDemandAvailableHours = occupancyRecords.reduce(
+        (sum, o) => {
+          return sum + o.totalAvailableHours * 0.7; // Estimate: 70% is normal demand
+        },
+        0,
+      );
+
+      // Create response DTO
+      const dto: TutorOccupancyDto = {
+        tutorId,
+        subject: primaryOccupancy.subjectName, // Primary subject
+        totalSessions: occupancyRecords.reduce((sum, o) => sum + o.totalSessions, 0),
+        totalAvailableHours: occupancyRecords.reduce(
+          (sum, o) => sum + o.totalAvailableHours,
+          0,
+        ),
+        sessionsPerHour:
+          occupancyRecords.reduce((sum, o) => sum + o.sessionsPerHour * o.totalAvailableHours, 0) /
+          occupancyRecords.reduce((sum, o) => sum + o.totalAvailableHours, 0),
+        occupancyRate:
+          occupancyRecords.reduce(
+            (sum, o) => sum + o.occupancyRate * o.totalAvailableHours,
+            0,
+          ) / occupancyRecords.reduce((sum, o) => sum + o.totalAvailableHours, 0),
+        highDemand: {
+          occupancyRate:
+            totalHighDemandAvailableHours > 0
+              ? (totalHighDemandHours / totalHighDemandAvailableHours) * 100
+              : 0,
+          sessionsPerHour:
+            totalHighDemandAvailableHours > 0
+              ? totalHighDemandSessions / totalHighDemandAvailableHours
+              : 0,
+          totalSessions: totalHighDemandSessions,
+          totalHoursOccupied: totalHighDemandHours,
+        } as DemandMetricsDto,
+        normalDemand: {
+          occupancyRate:
+            totalNormalDemandAvailableHours > 0
+              ? (totalNormalDemandHours / totalNormalDemandAvailableHours) * 100
+              : 0,
+          sessionsPerHour:
+            totalNormalDemandAvailableHours > 0
+              ? totalNormalDemandSessions / totalNormalDemandAvailableHours
+              : 0,
+          totalSessions: totalNormalDemandSessions,
+          totalHoursOccupied: totalNormalDemandHours,
+        } as DemandMetricsDto,
+      };
+
+      this.logger.log(
+        `BQ4: Occupancy for tutor ${tutorId}: ${dto.occupancyRate.toFixed(2)}%`,
+      );
+      return dto;
+    } catch (error) {
+      this.logger.error(`BQ4: Error reading occupancy for ${tutorId}:`, error);
+      throw error;
+    }
+  }
 
   /**
    * Returns tutors for a given course that:
@@ -850,6 +980,130 @@ export class AnalyticsService {
       dates,
       instantByDay: dates.map((d) => instantByDay.get(d) || 0),
       manualByDay: dates.map((d) => manualByDay.get(d) || 0),
+    };
+  }
+
+  /**
+   * BQ2: Save a carousel interaction event to Firestore (carouselEvents collection)
+   */
+  async saveCarouselEvent(
+    event: 'results_shown' | 'tutor_clicked' | 'booking_completed',
+    courseId: string,
+    options?: {
+      tutorId?: string;
+      tutorRating?: number;
+      resultCount?: number;
+      countdownMinutes?: number;
+      timestamp?: Date;
+    },
+  ): Promise<void> {
+    const db = this.firebaseService.getFirestore();
+    await db.collection('carouselEvents').add({
+      event,
+      courseId,
+      tutorId: options?.tutorId ?? null,
+      tutorRating: options?.tutorRating ?? null,
+      resultCount: options?.resultCount ?? null,
+      countdownMinutes: options?.countdownMinutes ?? null,
+      timestamp: options?.timestamp ?? new Date(),
+    });
+    this.logger.log(`BQ2: Carousel event saved – ${event}, course: ${courseId}`);
+  }
+
+  /**
+   * BQ2: Compute carousel funnel metrics for the last 7 days.
+   * Returns impressions, clicks, bookings per day plus aggregate rates.
+   */
+  async getBQ2DashboardData(): Promise<{
+    summary: { ctr: number; conversionRate: number; emptyResultRate: number; totalBookings: number };
+    dates: string[];
+    impressions: number[];
+    clicks: number[];
+    bookings: number[];
+    topTutors: { tutorId: string; clicks: number }[];
+    countdownBuckets: { label: string; count: number }[];
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('carouselEvents').get();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dates: string[] = [];
+    const impressionsByDay = new Map<string, number>();
+    const clicksByDay = new Map<string, number>();
+    const bookingsByDay = new Map<string, number>();
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      dates.push(key);
+      impressionsByDay.set(key, 0);
+      clicksByDay.set(key, 0);
+      bookingsByDay.set(key, 0);
+    }
+
+    let totalImpressions = 0;
+    let totalClicks = 0;
+    let totalBookings = 0;
+    let emptyResults = 0;
+    const tutorClickMap = new Map<string, number>();
+    const buckets = { '<30min': 0, '30-60min': 0, '1-2h': 0, '2-4h': 0 };
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const ts: Date = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+      if (ts < sevenDaysAgo) return;
+
+      const dateKey = ts.toISOString().split('T')[0];
+
+      switch (data.event) {
+        case 'results_shown':
+          totalImpressions++;
+          impressionsByDay.set(dateKey, (impressionsByDay.get(dateKey) ?? 0) + 1);
+          if ((data.resultCount ?? 1) === 0) emptyResults++;
+          break;
+        case 'tutor_clicked':
+          totalClicks++;
+          clicksByDay.set(dateKey, (clicksByDay.get(dateKey) ?? 0) + 1);
+          if (data.tutorId) tutorClickMap.set(data.tutorId, (tutorClickMap.get(data.tutorId) ?? 0) + 1);
+          if (typeof data.countdownMinutes === 'number') {
+            const m = data.countdownMinutes;
+            if (m < 30) buckets['<30min']++;
+            else if (m < 60) buckets['30-60min']++;
+            else if (m < 120) buckets['1-2h']++;
+            else buckets['2-4h']++;
+          }
+          break;
+        case 'booking_completed':
+          totalBookings++;
+          bookingsByDay.set(dateKey, (bookingsByDay.get(dateKey) ?? 0) + 1);
+          break;
+      }
+    });
+
+    const ctr = totalImpressions > 0 ? Math.round((totalClicks / totalImpressions) * 100) : 0;
+    const conversionRate = totalClicks > 0 ? Math.round((totalBookings / totalClicks) * 100) : 0;
+    const emptyResultRate = totalImpressions > 0 ? Math.round((emptyResults / totalImpressions) * 100) : 0;
+
+    const topTutors = [...tutorClickMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tutorId, clicks]) => ({ tutorId, clicks }));
+
+    const countdownBuckets = Object.entries(buckets).map(([label, count]) => ({ label, count }));
+
+    this.logger.log(`BQ2: Dashboard – impressions:${totalImpressions}, clicks:${totalClicks}, bookings:${totalBookings}`);
+
+    return {
+      summary: { ctr, conversionRate, emptyResultRate, totalBookings },
+      dates,
+      impressions: dates.map((d) => impressionsByDay.get(d) ?? 0),
+      clicks: dates.map((d) => clicksByDay.get(d) ?? 0),
+      bookings: dates.map((d) => bookingsByDay.get(d) ?? 0),
+      topTutors,
+      countdownBuckets,
     };
   }
 

@@ -16,6 +16,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "firebase-init": "node scripts/firebase-init-data.js",
+    "seed:carousel": "node scripts/seed-carousel-events.js",
+    "seed:carousel:clean": "node scripts/seed-carousel-events.js --clean",
     "test-gdrive": "node scripts/test-google-drive.js",
     "setup-admin-oauth": "node scripts/setup-admin-oauth.js",
     "reset-seed": "node scripts/reset-seed-firebase.js",
