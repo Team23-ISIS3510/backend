@@ -12,6 +12,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { NotificationService } from './notification.service';
+import { Notification } from './entities/notification.entity';
+import { SendEmergencyAlertEmailDto } from './dto/send-emergency-alert-email.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -191,6 +193,25 @@ export class NotificationController {
       };
     } catch (error) {
       this.logger.error(`Error deleting notification ${id}:`, error);
+      const message =
+        error instanceof Error ? error.message : 'Internal server error';
+      throw new HttpException(message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @ApiOperation({ summary: 'Send emergency alert email (Brevo)' })
+  @ApiResponse({ status: 201, description: 'Emergency email sent.' })
+  @ApiBody({ type: SendEmergencyAlertEmailDto })
+  @Post('emergency-alert/email')
+  async sendEmergencyAlertEmail(@Body() payload: SendEmergencyAlertEmailDto) {
+    try {
+      await this.notificationService.sendEmergencyAlertEmail(payload);
+      return {
+        success: true,
+        message: 'Emergency alert email sent successfully',
+      };
+    } catch (error) {
+      this.logger.error('Error sending emergency alert email:', error);
       const message =
         error instanceof Error ? error.message : 'Internal server error';
       throw new HttpException(message, HttpStatus.INTERNAL_SERVER_ERROR);
