@@ -314,8 +314,52 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ5: GET /analytics/booking-success
+   *
+   * Returns instant booking success rate and total bookings.
+   * Instant booking = tutorApprovalStatus === 'approved' AND status === 'scheduled'
+   */
+  @Get('booking-success')
+  @ApiOperation({
+    summary: 'BQ5: Booking success rate and total bookings',
+    description:
+      'Returns total bookings, instant confirmations, success rate percentage, ' +
+      'and a 7-day daily breakdown for instant vs manual bookings.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Booking success metrics',
+    schema: {
+      example: {
+        success: true,
+        totalBookings: 120,
+        instantConfirmations: 95,
+        successRate: 79.17,
+        dates: ['2026-04-13', '2026-04-14'],
+        instantByDay: [10, 8],
+        manualByDay: [3, 2],
+      },
+    },
+  })
+  async getBookingSuccess() {
+    try {
+      const data = await this.analyticsService.getBookingSuccessData();
+      return {
+        success: true,
+        ...data.summary,
+        dates: data.dates,
+        instantByDay: data.instantByDay,
+        manualByDay: data.manualByDay,
+      };
+    } catch (error) {
+      this.logger.error('BQ5: Error fetching booking success data:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ1: POST /analytics/bug
-   * 
+   *
    * Receives bug reports from the Kotlin mobile app
    * Stores crash reports, bugs, and other telemetry data
    */
