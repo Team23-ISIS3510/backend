@@ -2,6 +2,7 @@ export interface Availability {
     id?: string;
     tutorId: string; 
     title?: string;
+    description?: string;
     location?: string;
     startDateTime: Date;
     endDateTime: Date;
@@ -16,6 +17,7 @@ export interface Availability {
   
     // Optional metadata
     course?: string;
+    color?: string;
     createdAt: Date;
     updatedAt?: Date;
   }

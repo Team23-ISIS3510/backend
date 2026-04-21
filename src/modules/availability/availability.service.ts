@@ -120,12 +120,145 @@ export class AvailabilityService {
     }
   }
 
+  async createAvailability(createDto: any): Promise<AvailabilityResponseDto> {
+    try {
+      const { tutorId, title, date, startTime, endTime, location, description, course } = createDto;
+
+      // Validations
+      if (!tutorId || !title || !date || !startTime || !endTime) {
+        throw new Error('Missing required fields: tutorId, title, date, startTime, endTime');
+      }
+
+      if (startTime >= endTime) {
+        throw new Error('Start time must be before end time');
+      }
+
+      // Parse times
+      const [startHour, startMin] = startTime.split(':').map(Number);
+      const [endHour, endMin] = endTime.split(':').map(Number);
+
+      if (isNaN(startHour) || isNaN(startMin) || isNaN(endHour) || isNaN(endMin)) {
+        throw new Error('Invalid time format. Use HH:MM');
+      }
+
+      // Create DateTime objects
+      const startDateTime = new Date(`${date}T${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00Z`);
+      const endDateTime = new Date(`${date}T${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00Z`);
+
+      if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+        throw new Error('Invalid date format. Use YYYY-MM-DD');
+      }
+
+      // Create availability object
+      const availabilityData: Partial<Availability> = {
+        tutorId,
+        title,
+        startDateTime,
+        endDateTime,
+        location,
+        description,
+        course,
+        recurring: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Save to Firebase (without googleEventId for now)
+      const id = await this.availabilityRepository.save(undefined, availabilityData);
+      this.logger.log(`Availability created: ${id}`);
+
+      // Fetch and return the created availability
+      const created = await this.availabilityRepository.findById(id);
+      if (!created) {
+        throw new Error('Failed to retrieve created availability');
+      }
+
+      return AvailabilityResponseDto.fromEntity(created);
+    } catch (error) {
+      this.logger.error('Error creating availability:', error);
+      throw error;
+    }
+  }
+
   async deleteAvailability(googleEventId: string): Promise<void> {
     try {
       await this.availabilityRepository.delete(googleEventId);
       this.logger.log(`Availability deleted from Firebase: ${googleEventId}`);
     } catch (error) {
       this.logger.error('Error deleting availability:', error);
+      throw error;
+    }
+  }
+
+  async updateAvailability(
+    availabilityId: string,
+    updateData: any,
+  ): Promise<AvailabilityResponseDto> {
+    try {
+      // Get current availability
+      const current = await this.availabilityRepository.findById(availabilityId);
+      if (!current) {
+        throw new Error(`Availability with ID ${availabilityId} not found`);
+      }
+
+      // Prepare update payload
+      const updatePayload: any = {
+        ...current,
+      };
+
+      // Update title if provided
+      if (updateData.title) {
+        updatePayload.title = updateData.title;
+      }
+
+      // Update date and times if provided
+      if (updateData.date || updateData.startTime || updateData.endTime) {
+        const date = updateData.date || current.startDateTime.toISOString().split('T')[0];
+        const startTime = updateData.startTime || current.startDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        const endTime = updateData.endTime || current.endDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+        // Validate times
+        if (startTime >= endTime) {
+          throw new Error('Start time must be before end time');
+        }
+
+        // Parse times
+        const [startHour, startMin] = startTime.split(':').map(Number);
+        const [endHour, endMin] = endTime.split(':').map(Number);
+
+        const startDateTime = new Date(`${date}T${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00Z`);
+        const endDateTime = new Date(`${date}T${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00Z`);
+
+        if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+          throw new Error('Invalid date/time format');
+        }
+
+        updatePayload.startDateTime = startDateTime;
+        updatePayload.endDateTime = endDateTime;
+      }
+
+      // Update optional fields
+      if (updateData.location !== undefined) {
+        updatePayload.location = updateData.location;
+      }
+
+      if (updateData.description !== undefined) {
+        updatePayload.description = updateData.description;
+      }
+
+      if (updateData.course !== undefined) {
+        updatePayload.course = updateData.course;
+      }
+
+      // Update in repository
+      await this.availabilityRepository.save(availabilityId, updatePayload);
+      this.logger.log(`Availability updated: ${availabilityId}`);
+
+      // Return updated availability
+      const updated = await this.availabilityRepository.findById(availabilityId);
+      return AvailabilityResponseDto.fromEntity(updated);
+    } catch (error) {
+      this.logger.error('Error updating availability:', error);
       throw error;
     }
   }
