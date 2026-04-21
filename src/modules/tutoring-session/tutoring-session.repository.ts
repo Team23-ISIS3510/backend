@@ -247,7 +247,6 @@ export class TutoringSessionRepository {
         .orderBy('scheduledStart', 'desc')
         .limit(limit)
         .get();
-      console.log("Snapshot", snapshot.docs)
       const sessions: TutoringSession[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
