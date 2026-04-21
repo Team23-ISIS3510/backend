@@ -6,13 +6,14 @@ import { FirebaseModule } from '../firebase/firebase.module';
 import { AvailabilityModule } from '../availability/availability.module';
 import { UserModule } from '../user/user.module';
 import { TutoringSessionModule } from '../tutoring-session/tutoring-session.module';
+import { AuthModule } from '../auth/auth.module';
 import { OccupancyRepository } from './repositories/occupancy.repository';
 import { AnalyticsOccupancyUpdateService } from './analytics-occupancy-update.service';
 import { TutoringSessionOccupancyUpdateService } from '../tutoring-session/tutoring-session-occupancy-update.service';
 import { AvailabilityOccupancyUpdateService } from '../availability/availability-occupancy-update.service';
 
 @Module({
-  imports: [FirebaseModule, forwardRef(() => AvailabilityModule), UserModule, forwardRef(() => TutoringSessionModule)],
+  imports: [FirebaseModule, forwardRef(() => AvailabilityModule), UserModule, forwardRef(() => TutoringSessionModule), AuthModule],
   controllers: [AnalyticsController],
   providers: [
     AnalyticsService,
