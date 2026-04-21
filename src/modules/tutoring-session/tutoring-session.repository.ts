@@ -469,6 +469,65 @@ export class TutoringSessionRepository {
   }
 
   /**
+   * Find the next confirmed session for a tutor starting within 60 minutes from now
+   */
+  async findUpcomingSessionWithin60Minutes(
+    tutorId: string,
+  ): Promise<{ studentName: string; minutesToStart: number } | null> {
+    try {
+      const now = new Date();
+      const sixtyMinutesFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+
+      const snapshot = await this.firebaseService
+        .getFirestore()
+        .collection(this.STANDARD_COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .where('status', 'in', ['scheduled', 'pending'])
+        // Not cancelled sessions
+        .get();
+
+      let nextSession: any = null;
+      let minDifference = Infinity;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const session = this.mapDocToSession(doc.id, data);
+
+        if (session.scheduledStart) {
+          const startTime = new Date(session.scheduledStart);
+
+          // Check if session starts within the next 60 minutes
+          if (startTime > now && startTime <= sixtyMinutesFromNow) {
+            const timeDifference = startTime.getTime() - now.getTime();
+            // Keep track of the nearest session
+            if (timeDifference < minDifference) {
+              minDifference = timeDifference;
+              nextSession = session;
+            }
+          }
+        }
+      });
+
+      if (!nextSession) {
+        return null;
+      }
+
+      const minutesToStart = Math.floor(minDifference / (60 * 1000));
+
+      return {
+        studentName: nextSession.studentName || 'Unknown Student',
+        minutesToStart,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error finding upcoming sessions within 60 minutes for tutor ${tutorId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Get all sessions for a tutor in the last 2 years
    * Used by analytics for occupancy calculations (searches both collections)
    */
