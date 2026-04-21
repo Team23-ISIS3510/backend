@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { NotificationRepository } from './notification.repository';
 import { Notification } from './entities/notification.entity';
+import { BrevoEmailService } from './brevo-email.service';
+import { SendEmergencyAlertEmailDto } from './dto/send-emergency-alert-email.dto';
 
 @Injectable()
 export class NotificationService {
@@ -8,6 +10,7 @@ export class NotificationService {
 
   constructor(
     private readonly notificationRepository: NotificationRepository,
+    private readonly brevoEmailService: BrevoEmailService,
   ) {}
 
   async getNotificationById(id: string): Promise<Notification> {
@@ -61,5 +64,15 @@ export class NotificationService {
 
   async deleteNotification(id: string): Promise<void> {
     await this.notificationRepository.delete(id);
+  }
+
+  async sendEmergencyAlertEmail(payload: SendEmergencyAlertEmailDto) {
+    return this.brevoEmailService.sendEmergencyMovementAlertEmail({
+      toEmail: payload.toEmail,
+      toName: payload.toName,
+      studentName: payload.studentName,
+      alertReason: payload.alertReason,
+      location: payload.location,
+    });
   }
 }

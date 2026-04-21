@@ -1,12 +1,14 @@
-import { Controller, Get, Post, Body, Query, BadRequestException, Logger, Param, NotFoundException, Res } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, BadRequestException, Logger, Param, NotFoundException, Res, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { CreateBugReportDto } from './dto/bug-report.dto';
 import { CreateCarouselEventDto } from './dto/carousel-event.dto';
 import { UserService } from '../user/user.service';
+import { TutoringSessionService } from '../tutoring-session/tutoring-session.service';
+import { FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
 
 class AvailableTutorsResponseDto {
   @ApiProperty({ example: true })
@@ -54,6 +56,7 @@ export class AnalyticsController {
     private readonly analyticsService: AnalyticsService,
      private readonly analyticsBookingService: AnalyticsBookingService,
     private readonly userService: UserService,
+    private readonly sessionService: TutoringSessionService,
   ) {}
 
   /**
@@ -781,5 +784,56 @@ export class AnalyticsController {
     
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
+  }
+
+  /**
+   * GET /analytics/session-alert
+   * 
+   * Check for upcoming confirmed sessions for the logged-in tutor.
+   * Returns the next session starting within 60 minutes.
+   */
+  @Get('session-alert')
+  @UseGuards(FirebaseAuthGuard)
+  @ApiOperation({
+    summary: 'Get upcoming session alert',
+    description: 'Returns the next confirmed session starting within 60 minutes for the logged-in tutor',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Session alert data',
+    schema: {
+      example: {
+        hasAlert: true,
+        studentName: 'John Doe',
+        minutesToStart: 45,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - no valid Firebase token',
+  })
+  async getSessionAlert(@Req() req: any) {
+    const user = req.user;
+    if (!user || !user.uid) {
+      throw new UnauthorizedException('User ID not found in token');
+    }
+
+    const tutorId = user.uid;
+    const result = await this.sessionService.findUpcomingSessionWithin60Minutes(tutorId);
+
+    if (!result) {
+      return {
+        hasAlert: false,
+        studentName: null,
+        minutesToStart: null,
+      };
+    }
+
+    return {
+      hasAlert: true,
+      studentName: result.studentName,
+      minutesToStart: result.minutesToStart,
+    };
   }
 }

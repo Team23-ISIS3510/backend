@@ -155,6 +155,15 @@ export class TutoringSessionService {
   }
 
   /**
+   * Find the next confirmed session for a tutor starting within 60 minutes
+   */
+  async findUpcomingSessionWithin60Minutes(
+    tutorId: string,
+  ): Promise<{ studentName: string; minutesToStart: number } | null> {
+    return await this.sessionRepository.findUpcomingSessionWithin60Minutes(tutorId);
+  }
+
+  /**
    * Book a specific slot for a student
    */
   async bookSpecificSlot(
