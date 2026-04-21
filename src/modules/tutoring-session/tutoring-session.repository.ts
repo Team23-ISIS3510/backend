@@ -482,7 +482,8 @@ export class TutoringSessionRepository {
         .getFirestore()
         .collection(this.STANDARD_COLLECTION)
         .where('tutorId', '==', tutorId)
-        .where('status', '==', 'confirmed')
+        .where('status', 'in', ['scheduled', 'pending'])
+        // Not cancelled sessions
         .get();
 
       let nextSession: any = null;
