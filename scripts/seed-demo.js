@@ -164,19 +164,43 @@ function buildTutors() {
         updatedAt: now,
       },
     },
+    {
+      id: 'demo-tutor-004',
+      data: {
+        email: 'carlos.ruiz.demo@uniandes.edu.co',
+        name: 'Carlos Ruiz',
+        phone: '+57 300 111 0004',
+        isTutor: true,
+        rating: 4.6,
+        courses: ['demo-course-calculo', 'demo-course-prog'],
+        location: 'Bloque W, Sala 101',
+        bio: 'Ingeniería Civil, 7° semestre. Tutor de cálculo y programación.',
+        hourlyRate: 19,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+    {
+      id: 'demo-tutor-005',
+      data: {
+        email: 'sofia.castro.demo@uniandes.edu.co',
+        name: 'Sofía Castro',
+        phone: '+57 300 111 0005',
+        isTutor: true,
+        rating: 4.9,
+        courses: ['demo-course-prog'],
+        location: 'Virtual',
+        bio: 'Ingeniería de Sistemas, 10° semestre. Experta en patrones de diseño.',
+        hourlyRate: 25,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
   ];
 }
 
 function buildAvailabilities() {
   const now = ts(new Date());
-
-  // Slot windows (all starting well within the 4-hour query window):
-  //  001a → +30 min  to +90 min
-  //  001b → +2 h     to +3 h
-  //  002a → +45 min  to +105 min
-  //  002b → +2.5 h   to +3.5 h
-  //  003a → +1 h     to +2 h
-  //  003b → +3 h     to +4 h
 
   return [
     {
@@ -257,68 +281,28 @@ function buildAvailabilities() {
         updatedAt: now,
       },
     },
-  ];
-}
-
-// ── Completed sessions (power the "Your Go-To Tutor" feature) ───────────────
-
-/**
- * Creates 3 past completed sessions for a real student UID:
- *   Ana García × 2  →  she ranks #1 (go-to tutor for Cálculo)
- *   Luis Mora  × 1  →  he ranks #2
- */
-function buildHistory(studentId) {
-  const now = ts(new Date());
-  const pastDate = (daysAgo) => ts(new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000));
-
-  return [
     {
-      id: 'demo-hist-001',
+      id: 'demo-avail-004a',
       data: {
-        tutorId:     'demo-tutor-001',
-        tutorName:   'Ana García',
-        studentId,
-        courseId:    'demo-course-calculo',
-        course:      'Cálculo Diferencial',
-        scheduledStart: pastDate(10),
-        scheduledEnd:   ts(new Date(Date.now() - 10 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000)),
-        status: 'completed',
-        completedAt: pastDate(10),
-        rating: 5,
+        tutorId: 'demo-tutor-004',
+        course: 'demo-course-calculo',
+        title: 'Tutoría Cálculo – Presencial',
+        location: 'Bloque W, Sala 101',
+        startDateTime: ts(minsFromNow(60)),
+        endDateTime:   ts(minsFromNow(120)),
         createdAt: now,
         updatedAt: now,
       },
     },
     {
-      id: 'demo-hist-002',
+      id: 'demo-avail-005a',
       data: {
-        tutorId:     'demo-tutor-001',
-        tutorName:   'Ana García',
-        studentId,
-        courseId:    'demo-course-calculo',
-        course:      'Cálculo Diferencial',
-        scheduledStart: pastDate(5),
-        scheduledEnd:   ts(new Date(Date.now() - 5 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000)),
-        status: 'completed',
-        completedAt: pastDate(5),
-        rating: 5,
-        createdAt: now,
-        updatedAt: now,
-      },
-    },
-    {
-      id: 'demo-hist-003',
-      data: {
-        tutorId:     'demo-tutor-002',
-        tutorName:   'Luis Mora',
-        studentId,
-        courseId:    'demo-course-calculo',
-        course:      'Cálculo Diferencial',
-        scheduledStart: pastDate(3),
-        scheduledEnd:   ts(new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000)),
-        status: 'completed',
-        completedAt: pastDate(3),
-        rating: 4,
+        tutorId: 'demo-tutor-005',
+        course: 'demo-course-prog',
+        title: 'Tutoría POO – Patrones de Diseño',
+        location: 'Virtual',
+        startDateTime: ts(minsFromNow(90)),
+        endDateTime:   ts(minsFromNow(150)),
         createdAt: now,
         updatedAt: now,
       },

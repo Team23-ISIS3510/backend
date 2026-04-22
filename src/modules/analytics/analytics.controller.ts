@@ -340,7 +340,7 @@ export class AnalyticsController {
         successRate: 79.17,
         dates: ['2026-04-13', '2026-04-14'],
         instantByDay: [10, 8],
-        manualByDay: [3, 2],
+        failedByDay: [3, 2],
       },
     },
   })
@@ -352,7 +352,7 @@ export class AnalyticsController {
         ...data.summary,
         dates: data.dates,
         instantByDay: data.instantByDay,
-        manualByDay: data.manualByDay,
+        failedByDay: data.failedByDay,
       };
     } catch (error) {
       this.logger.error('BQ5: Error fetching booking success data:', error);
@@ -616,8 +616,8 @@ export class AnalyticsController {
 
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-value">${bq5.summary.totalBookings}</div>
-          <div class="stat-label">Total Bookings</div>
+          <div class="stat-value">${bq5.summary.totalInstantAttempts}</div>
+          <div class="stat-label">Total Instant Attempts</div>
         </div>
         <div class="stat-card instant">
           <div class="stat-value">${bq5.summary.instantConfirmations}</div>
@@ -689,7 +689,7 @@ export class AnalyticsController {
     const dates = ${JSON.stringify(metrics.dates)};
     const bq5Dates = ${JSON.stringify(bq5.dates)};
     const instantByDay = ${JSON.stringify(bq5.instantByDay)};
-    const manualByDay = ${JSON.stringify(bq5.manualByDay)};
+    const failedByDay = ${JSON.stringify(bq5.failedByDay)};
     const crashes = ${JSON.stringify(metrics.crashes)};
     const bugs = ${JSON.stringify(metrics.bugs)};
     const latencyIssues = ${JSON.stringify(metrics.latencyIssues)};
@@ -761,8 +761,8 @@ export class AnalyticsController {
             borderRadius: 4,
           },
           {
-            label: 'Manual / Other',
-            data: manualByDay,
+            label: 'Failed / Other',
+            data: failedByDay,
             backgroundColor: 'rgba(107, 114, 128, 0.4)',
             borderColor: '#6b7280',
             borderWidth: 1,
