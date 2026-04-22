@@ -551,10 +551,10 @@ export class TutoringSessionRepository {
         }
       });
 
-      // Also search in alternative collection name (tutoringSessions) for legacy data
+      // Also search in alternative collection name (tutoring_sessions) for legacy data
       try {
         const snapshot2 = await db
-          .collection('tutoringSessions')
+          .collection('tutoring_sessions')
           .where('tutorId', '==', tutorId)
           .get();
 
@@ -608,10 +608,10 @@ export class TutoringSessionRepository {
         }
       });
 
-      // Also search in alternative collection name (tutoringSessions) for legacy data
+      // Also search in alternative collection name (tutoring_sessions) for legacy data
       try {
         const snapshot2 = await db
-          .collection('tutoringSessions')
+          .collection('tutoring_sessions')
           .where('tutorId', '==', tutorId)
           .get();
 
