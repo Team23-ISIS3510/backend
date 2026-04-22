@@ -20,6 +20,7 @@ export interface AvailableTutorResult {
     endDateTime: Date;
     location?: string;
     course?: string;
+    parentAvailabilityId?: string;
   } | null;
   availableSlotsCount: number;
 }
@@ -260,6 +261,7 @@ export class AnalyticsService {
               endDateTime: new Date(next.endDateTime),
               location: next.location,
               course: next.course,
+              parentAvailabilityId: next.id,
             },
             availableSlotsCount: active.length,
           });
@@ -901,6 +903,7 @@ export class AnalyticsService {
             endDateTime: new Date(next.endDateTime),
             location: next.location,
             course: next.course,
+            parentAvailabilityId: next.id,
           },
           availableSlotsCount: active.length,
           bookingCount,
