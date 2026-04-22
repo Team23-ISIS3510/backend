@@ -9,18 +9,22 @@
  * ─────────────
  *  • 2 courses         → collection: course
  *  • 3 tutors          → collection: users
+ *  • 1 student profile → collection: users
  *  • 6 availability blocks (within the next 4 h)
  *                      → collection: availabilities
- *  • 1 upcoming session → collection: tutoring_sessions
+ *  • 2 upcoming sessions → collection: tutoring_sessions
  *  • 3 completed sessions (only when --studentId is provided)
  *                      → collection: tutoring_sessions
  *    Ana García × 2 for Cálculo  → she becomes the "go-to tutor"
  *    Luis Mora   × 1 for Cálculo
+ *  • 6 carousel events (last 2 days)
+ *                      → collection: carouselEvents
  *
  * Usage
  * ─────
  *  node scripts/seed-demo.js                          ← base demo data
- *  node scripts/seed-demo.js --studentId=<firebase_uid>  ← + personalised history
+ *  node scripts/seed-demo.js --studentId=<firebase_uid>  ← seed for your real user
+ *  node scripts/seed-demo.js --studentId=<uid> --studentEmail=<email> --studentName="Tu Nombre"
  *  node scripts/seed-demo.js --clean                  ← delete seed documents
  *  node scripts/seed-demo.js --clean --studentId=<uid> ← delete everything incl. history
  *
@@ -55,10 +59,21 @@ const studentIdArg = process.argv
   ?.split('=')[1]
   ?.trim();
 
+const studentEmailArg = process.argv
+  .find((a) => a.startsWith('--studentEmail='))
+  ?.split('=')[1]
+  ?.trim();
+
+const studentNameArg = process.argv
+  .find((a) => a.startsWith('--studentName='))
+  ?.split('=')[1]
+  ?.trim();
+
 // ── Seed IDs (must stay stable so --clean can remove them) ───────────────────
 
 const COURSE_IDS   = ['demo-course-calculo', 'demo-course-prog'];
 const TUTOR_IDS    = ['demo-tutor-001', 'demo-tutor-002', 'demo-tutor-003'];
+const DEMO_STUDENT_ID = 'demo-student-001';
 const AVAIL_IDS    = [
   'demo-avail-001a', 'demo-avail-001b',
   'demo-avail-002a', 'demo-avail-002b',
@@ -66,6 +81,15 @@ const AVAIL_IDS    = [
 ];
 // Completed session IDs — only written when --studentId is provided
 const HISTORY_IDS  = ['demo-hist-001', 'demo-hist-002', 'demo-hist-003'];
+const UPCOMING_SESSION_IDS = ['demo-session-001', 'demo-session-002'];
+const CAROUSEL_EVENT_IDS = [
+  'demo-carousel-001',
+  'demo-carousel-002',
+  'demo-carousel-003',
+  'demo-carousel-004',
+  'demo-carousel-005',
+  'demo-carousel-006',
+];
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 
@@ -79,6 +103,16 @@ function hoursFromNow(h) {
 
 function minsFromNow(m) {
   return new Date(Date.now() + m * 60 * 1000);
+}
+
+function resolveStudentContext() {
+  const id = studentIdArg || DEMO_STUDENT_ID;
+  const name = studentNameArg || (studentIdArg ? 'Student Seeded User' : 'Demo Student');
+  const email =
+    studentEmailArg ||
+    (studentIdArg ? `student+${studentIdArg.slice(0, 8)}@demo.calico.app` : 'demo.student@uniandes.edu.co');
+
+  return { id, name, email };
 }
 
 // ── Data definitions ─────────────────────────────────────────────────────────
@@ -165,6 +199,22 @@ function buildTutors() {
       },
     },
   ];
+}
+
+function buildStudent(student) {
+  const now = ts(new Date());
+  return {
+    id: student.id,
+    data: {
+      email: student.email,
+      name: student.name,
+      phone: '+57 300 111 9999',
+      isTutor: false,
+      description: 'Perfil de estudiante para pruebas integrales del frontend.',
+      createdAt: now,
+      updatedAt: now,
+    },
+  };
 }
 
 function buildAvailabilities() {
@@ -328,30 +378,136 @@ function buildHistory(studentId) {
 
 // ── Session data (one upcoming session so the Sessions section isn't empty) ───
 
-const SESSION_ID = 'demo-session-001';
-
-function buildSession() {
+function buildUpcomingSessions(student) {
   const now = ts(new Date());
-  return {
-    id: SESSION_ID,
-    data: {
-      tutorId:    'demo-tutor-001',
-      studentId:  'demo-student-001',
-      courseId:   'demo-course-calculo',
-      course:     'Cálculo Diferencial',
-      tutorName:  'Ana García',
-      studentName:'Demo Student',
-      scheduledStart: ts(hoursFromNow(1)),
-      scheduledEnd:   ts(hoursFromNow(2)),
-      status: 'scheduled',
-      tutorApprovalStatus: 'approved',
-      location: 'Virtual',
-      price: 20,
-      paymentStatus: 'pending',
-      createdAt: now,
-      updatedAt: now,
+  return [
+    {
+      id: 'demo-session-001',
+      data: {
+        tutorId: 'demo-tutor-001',
+        studentId: student.id,
+        studentEmail: student.email,
+        courseId: 'demo-course-calculo',
+        course: 'Cálculo Diferencial',
+        tutorName: 'Ana García',
+        tutorEmail: 'ana.garcia.demo@uniandes.edu.co',
+        studentName: student.name,
+        scheduledStart: ts(hoursFromNow(1)),
+        scheduledEnd: ts(hoursFromNow(2)),
+        status: 'scheduled',
+        tutorApprovalStatus: 'approved',
+        location: 'Virtual',
+        price: 20,
+        paymentStatus: 'pending',
+        requiresApproval: false,
+        createdAt: now,
+        updatedAt: now,
+      },
     },
-  };
+    {
+      id: 'demo-session-002',
+      data: {
+        tutorId: 'demo-tutor-003',
+        studentId: student.id,
+        studentEmail: student.email,
+        courseId: 'demo-course-prog',
+        course: 'Programación Orientada a Objetos',
+        tutorName: 'María López',
+        tutorEmail: 'maria.lopez.demo@uniandes.edu.co',
+        studentName: student.name,
+        scheduledStart: ts(hoursFromNow(3)),
+        scheduledEnd: ts(hoursFromNow(4)),
+        status: 'scheduled',
+        tutorApprovalStatus: 'approved',
+        location: 'Virtual',
+        price: 22,
+        paymentStatus: 'pending',
+        requiresApproval: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+  ];
+}
+
+function buildCarouselEvents() {
+  const now = new Date();
+  const minutesAgo = (m) => new Date(now.getTime() - m * 60 * 1000);
+
+  return [
+    {
+      id: 'demo-carousel-001',
+      data: {
+        event: 'results_shown',
+        courseId: 'demo-course-calculo',
+        tutorId: null,
+        tutorRating: null,
+        resultCount: 2,
+        countdownMinutes: null,
+        timestamp: ts(minutesAgo(120)),
+      },
+    },
+    {
+      id: 'demo-carousel-002',
+      data: {
+        event: 'tutor_clicked',
+        courseId: 'demo-course-calculo',
+        tutorId: 'demo-tutor-001',
+        tutorRating: 4.9,
+        resultCount: null,
+        countdownMinutes: 25,
+        timestamp: ts(minutesAgo(118)),
+      },
+    },
+    {
+      id: 'demo-carousel-003',
+      data: {
+        event: 'booking_completed',
+        courseId: 'demo-course-calculo',
+        tutorId: 'demo-tutor-001',
+        tutorRating: 4.9,
+        resultCount: null,
+        countdownMinutes: null,
+        timestamp: ts(minutesAgo(116)),
+      },
+    },
+    {
+      id: 'demo-carousel-004',
+      data: {
+        event: 'results_shown',
+        courseId: 'demo-course-prog',
+        tutorId: null,
+        tutorRating: null,
+        resultCount: 1,
+        countdownMinutes: null,
+        timestamp: ts(minutesAgo(60)),
+      },
+    },
+    {
+      id: 'demo-carousel-005',
+      data: {
+        event: 'tutor_clicked',
+        courseId: 'demo-course-prog',
+        tutorId: 'demo-tutor-003',
+        tutorRating: 4.8,
+        resultCount: null,
+        countdownMinutes: 55,
+        timestamp: ts(minutesAgo(57)),
+      },
+    },
+    {
+      id: 'demo-carousel-006',
+      data: {
+        event: 'results_shown',
+        courseId: 'demo-course-calculo',
+        tutorId: null,
+        tutorRating: null,
+        resultCount: 0,
+        countdownMinutes: null,
+        timestamp: ts(minutesAgo(15)),
+      },
+    },
+  ];
 }
 
 // ── Clean ─────────────────────────────────────────────────────────────────────
@@ -369,10 +525,17 @@ async function clean() {
   for (const id of AVAIL_IDS)
     batch.delete(db.collection('availabilities').doc(id));
 
-  batch.delete(db.collection('tutoring_sessions').doc(SESSION_ID));
+  for (const id of UPCOMING_SESSION_IDS)
+    batch.delete(db.collection('tutoring_sessions').doc(id));
 
   for (const id of HISTORY_IDS)
     batch.delete(db.collection('tutoring_sessions').doc(id));
+
+  for (const id of CAROUSEL_EVENT_IDS)
+    batch.delete(db.collection('carouselEvents').doc(id));
+
+  // Only remove the default demo student. Never delete a real user UID provided by --studentId.
+  batch.delete(db.collection('users').doc(DEMO_STUDENT_ID));
 
   await batch.commit();
   console.log('✅ Seed data deleted.\n');
@@ -381,6 +544,7 @@ async function clean() {
 // ── Seed ──────────────────────────────────────────────────────────────────────
 
 async function seed() {
+  const student = resolveStudentContext();
   console.log('🌱 Seeding demo data …\n');
 
   // Courses
@@ -397,6 +561,14 @@ async function seed() {
     console.log(`   ✓ users/${id}  (${data.name}, ★ ${data.rating})`);
   }
 
+  // Student profile for Profile screen + student-centric endpoints
+  console.log('\n🎓 Writing student profile …');
+  const seededStudent = buildStudent(student);
+  await db.collection('users').doc(seededStudent.id).set(seededStudent.data, {
+    merge: true,
+  });
+  console.log(`   ✓ users/${seededStudent.id}  (${seededStudent.data.name})`);
+
   // Availabilities
   console.log('\n🕐 Writing availabilities …');
   for (const { id, data } of buildAvailabilities()) {
@@ -407,22 +579,34 @@ async function seed() {
     console.log(`   ✓ availabilities/${id}  (tutor: ${data.tutorId}, starts: ${hh}:${mm})`);
   }
 
-  // Upcoming session
-  console.log('\n📅 Writing demo session …');
-  const session = buildSession();
-  await db.collection('tutoring_sessions').doc(session.id).set(session.data, { merge: true });
-  console.log(`   ✓ tutoring_sessions/${session.id}`);
+  // Upcoming sessions
+  console.log('\n📅 Writing upcoming sessions …');
+  for (const session of buildUpcomingSessions(student)) {
+    await db
+      .collection('tutoring_sessions')
+      .doc(session.id)
+      .set(session.data, { merge: true });
+    console.log(
+      `   ✓ tutoring_sessions/${session.id}  (${session.data.tutorName} -> ${session.data.studentName})`,
+    );
+  }
 
   // Completed sessions (Your Go-To Tutor feature)
-  if (studentIdArg) {
-    console.log(`\n📖 Writing completed sessions for student ${studentIdArg} …`);
-    for (const { id, data } of buildHistory(studentIdArg)) {
-      await db.collection('tutoring_sessions').doc(id).set(data, { merge: true });
+  console.log(`\n📖 Writing completed sessions for student ${student.id} …`);
+  for (const { id, data } of buildHistory(student.id)) {
+      await db.collection('tutoring_sessions').doc(id).set({
+        ...data,
+        studentName: student.name,
+        studentEmail: student.email,
+      }, { merge: true });
       console.log(`   ✓ tutoring_sessions/${id}  (${data.tutorName} × ${data.courseId}, completed)`);
-    }
-  } else {
-    console.log('\n💡 Tip: pass --studentId=<your_firebase_uid> to also seed the');
-    console.log('   "Your Go-To Tutor" history (completed sessions).');
+  }
+
+  // Analytics events for carousel dashboard + conversion rates
+  console.log('\n📊 Writing carousel analytics events …');
+  for (const event of buildCarouselEvents()) {
+    await db.collection('carouselEvents').doc(event.id).set(event.data, { merge: true });
+    console.log(`   ✓ carouselEvents/${event.id}  (${event.data.event})`);
   }
 
   console.log('\n─────────────────────────────────────────────────────────────');
@@ -434,14 +618,12 @@ async function seed() {
   console.log('  Top Rated & Available Soon');
   console.log('  ├─ Ana García   ★ 4.9  (in ~30 min)');
   console.log('  └─ Luis Mora   ★ 4.7  (in ~45 min)');
-  if (studentIdArg) {
-    console.log('  Your Go-To Tutor');
-    console.log('  └─ Ana García   ★ 4.9  ·  Booked 2×\n');
-  } else {
-    console.log('  (Your Go-To Tutor hidden — no history seeded)\n');
-  }
+  console.log('  Your Go-To Tutor');
+  console.log('  └─ Ana García   ★ 4.9  ·  Booked 2×\n');
   console.log('  Upcoming Sessions');
-  console.log('  └─ Session with Ana García (Cálculo Diferencial, in ~1 h)\n');
+  console.log('  ├─ Session with Ana García (Cálculo Diferencial, in ~1 h)');
+  console.log('  └─ Session with María López (POO, in ~3 h)\n');
+  console.log(`  Student used for seed: ${student.id} (${student.email})\n`);
   console.log('Run  node scripts/seed-demo.js --clean  to remove this data.');
   console.log('─────────────────────────────────────────────────────────────\n');
 }
