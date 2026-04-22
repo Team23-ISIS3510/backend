@@ -1152,9 +1152,10 @@ export class AnalyticsService {
    * - Crashes: app crashes
    * - Bugs: user-reported bugs
    * - Latency Issues: API requests that exceeded 2 second threshold
+   * - Cancellation Rate: % of confirmed bookings cancelled <12h before start
    */
   async getDashboardData(): Promise<{
-    summary: { crashes: number; bugs: number; latencyIssues: number };
+    summary: { crashes: number; bugs: number; latencyIssues: number; cancellationRate: number; totalCancellations: number };
     dates: string[];
     crashes: number[];
     bugs: number[];
@@ -1216,8 +1217,11 @@ export class AnalyticsService {
       }
     });
 
+    // Calculate cancellation rate
+    const { cancellationRate, totalCancellations, totalConfirmed } = await this.calculateCancellationRate();
+
     this.logger.log(
-      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}`,
+      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}, Cancellations: ${totalCancellations}/${totalConfirmed} (${cancellationRate}%)`,
     );
 
     return {
@@ -1225,11 +1229,69 @@ export class AnalyticsService {
         crashes: totalCrashes,
         bugs: totalBugs,
         latencyIssues: totalLatencyIssues,
+        cancellationRate,
+        totalCancellations,
       },
       dates,
       crashes: dates.map((d) => crashesByDay.get(d) || 0),
       bugs: dates.map((d) => bugsByDay.get(d) || 0),
       latencyIssues: dates.map((d) => latencyIssuesByDay.get(d) || 0),
     };
+  }
+
+  /**
+   * Calculate cancellation rate for confirmed bookings
+   * Only counts cancellations that happened < 12 hours before scheduled start
+   */
+  private async calculateCancellationRate(): Promise<{
+    cancellationRate: number;
+    totalCancellations: number;
+    totalConfirmed: number;
+  }> {
+    try {
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db.collection('tutoring_sessions').where('status', '==', 'confirmed').get();
+
+      let totalConfirmed = 0;
+      let totalCancellations = 0;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        totalConfirmed++;
+
+        // Check if session was cancelled
+        if (data.cancelledAt) {
+          const scheduledStart = data.scheduledStart?.toDate
+            ? data.scheduledStart.toDate()
+            : new Date(data.scheduledStart);
+          
+          const cancelledAt = data.cancelledAt?.toDate
+            ? data.cancelledAt.toDate()
+            : new Date(data.cancelledAt);
+
+          // Calculate hours between cancellation and scheduled start
+          const hoursBeforeStart = (scheduledStart.getTime() - cancelledAt.getTime()) / (1000 * 60 * 60);
+
+          // Only count if cancelled less than 12 hours before start
+          if (hoursBeforeStart < 12 && hoursBeforeStart > 0) {
+            totalCancellations++;
+          }
+        }
+      });
+
+      const cancellationRate =
+        totalConfirmed > 0
+          ? Math.round((totalCancellations / totalConfirmed) * 10000) / 100
+          : 0;
+
+      this.logger.log(
+        `Cancellation Rate: ${totalCancellations}/${totalConfirmed} = ${cancellationRate}%`,
+      );
+
+      return { cancellationRate, totalCancellations, totalConfirmed };
+    } catch (error) {
+      this.logger.error('Error calculating cancellation rate:', error);
+      return { cancellationRate: 0, totalCancellations: 0, totalConfirmed: 0 };
+    }
   }
 }

@@ -566,6 +566,23 @@ export class AnalyticsController {
       <canvas id="stabilityChart"></canvas>
     </div>
 
+    <!-- BQ3: Booking Cancellation Rate -->
+    <div class="section">
+      <h1 class="section-title">Booking Reliability</h1>
+      
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${metrics.summary.cancellationRate}%</div>
+          <div class="stat-label">Cancellation Rate</div>
+          <div style="font-size: 0.85rem; margin-top: 0.5rem; opacity: 0.8;">Cancelled <12h before start</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${metrics.summary.totalCancellations}</div>
+          <div class="stat-label">Late Cancellations</div>
+        </div>
+      </div>
+    </div>
+
     <!-- BQ5: Instant Booking Success Rate -->
     <div class="section">
       <h1 class="section-title">Instant Booking Success Rate</h1>
