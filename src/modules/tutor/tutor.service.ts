@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
+import { AcademicService } from '../academic/academic.service';
+import { Course } from '../academic/entities/course.entity';
 
 export interface SanitizedTutor {
   id: string;
@@ -27,6 +29,7 @@ export class TutorService {
   constructor(
     private readonly firebaseService: FirebaseService,
     private readonly availabilityRepository: AvailabilityRepository,
+    private readonly academicService: AcademicService,
   ) {}
 
   /**
@@ -362,5 +365,67 @@ export class TutorService {
       throw new Error(`Error fetching tutor availability: ${error.message}`);
     }
   }
-}
 
+  /**
+   * Get courses for a tutor
+   * Returns the full course objects that the tutor is allowed to teach
+   */
+  async getTutorCourses(tutorId: string): Promise<Course[]> {
+    try {
+      this.logger.log(`Fetching courses for tutor: ${tutorId}`);
+      const db = this.firebaseService.getFirestore();
+
+      // Try by document ID first
+      let userDoc = await db.collection('users').doc(tutorId).get();
+
+      // If not found by document ID and it looks like an email, try by email field
+      if (!userDoc.exists && tutorId.includes('@')) {
+        const emailQuery = await db
+          .collection('users')
+          .where('email', '==', tutorId)
+          .where('isTutor', '==', true)
+          .limit(1)
+          .get();
+
+        if (!emailQuery.empty) {
+          userDoc = emailQuery.docs[0];
+        }
+      }
+
+      if (!userDoc.exists) {
+        this.logger.warn(`Tutor ${tutorId} not found`);
+        throw new NotFoundException(`Tutor ${tutorId} not found`);
+      }
+
+      const userData = userDoc.data();
+      if (!userData?.isTutor) {
+        this.logger.warn(`User ${tutorId} is not a tutor`);
+        throw new NotFoundException(`User ${tutorId} is not a tutor`);
+      }
+
+      const courseIds = Array.isArray(userData?.courses) ? userData.courses : [];
+      this.logger.log(`Found ${courseIds.length} course IDs for tutor ${tutorId}: ${courseIds.join(', ')}`);
+
+      // Fetch full course objects for each course ID
+      const courses: Course[] = [];
+      for (const courseId of courseIds) {
+        try {
+          const course = await this.academicService.getCourseById(courseId);
+          if (course) {
+            courses.push(course);
+          } else {
+            this.logger.warn(`Course ${courseId} not found for tutor ${tutorId}`);
+          }
+        } catch (courseError) {
+          this.logger.warn(`Error fetching course ${courseId}:`, courseError);
+        }
+      }
+
+      this.logger.log(`Returning ${courses.length} courses for tutor ${tutorId}`);
+      return courses;
+    } catch (error) {
+      this.logger.error(`Error fetching courses for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
+}

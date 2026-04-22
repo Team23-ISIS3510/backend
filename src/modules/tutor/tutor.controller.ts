@@ -31,4 +31,16 @@ export class TutorController {
   findOne(@Param('id') id: string) {
     return this.tutorService.getTutorById(id);
   }
+
+  @ApiOperation({
+    summary: 'Get courses for a tutor',
+    description: 'Returns the list of courses that the tutor is allowed to teach.',
+  })
+  @ApiParam({ name: 'tutorId', description: 'Tutor Firebase UID' })
+  @ApiResponse({ status: 200, description: 'List of courses.' })
+  @ApiResponse({ status: 404, description: 'Tutor not found.' })
+  @Get(':tutorId/courses')
+  async getTutorCourses(@Param('tutorId') tutorId: string) {
+    return this.tutorService.getTutorCourses(tutorId);
+  }
 }
