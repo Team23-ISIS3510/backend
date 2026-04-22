@@ -317,8 +317,52 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ5: GET /analytics/booking-success
+   *
+   * Returns instant booking success rate and total bookings.
+   * Instant booking = tutorApprovalStatus === 'approved' AND status === 'scheduled'
+   */
+  @Get('booking-success')
+  @ApiOperation({
+    summary: 'BQ5: Booking success rate and total bookings',
+    description:
+      'Returns total bookings, instant confirmations, success rate percentage, ' +
+      'and a 7-day daily breakdown for instant vs manual bookings.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Booking success metrics',
+    schema: {
+      example: {
+        success: true,
+        totalBookings: 120,
+        instantConfirmations: 95,
+        successRate: 79.17,
+        dates: ['2026-04-13', '2026-04-14'],
+        instantByDay: [10, 8],
+        failedByDay: [3, 2],
+      },
+    },
+  })
+  async getBookingSuccess() {
+    try {
+      const data = await this.analyticsService.getBookingSuccessData();
+      return {
+        success: true,
+        ...data.summary,
+        dates: data.dates,
+        instantByDay: data.instantByDay,
+        failedByDay: data.failedByDay,
+      };
+    } catch (error) {
+      this.logger.error('BQ5: Error fetching booking success data:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ1: POST /analytics/bug
-   * 
+   *
    * Receives bug reports from the Kotlin mobile app
    * Stores crash reports, bugs, and other telemetry data
    */
@@ -589,8 +633,8 @@ export class AnalyticsController {
 
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-value">${bq5.summary.totalBookings}</div>
-          <div class="stat-label">Total Bookings</div>
+          <div class="stat-value">${bq5.summary.totalInstantAttempts}</div>
+          <div class="stat-label">Total Instant Attempts</div>
         </div>
         <div class="stat-card instant">
           <div class="stat-value">${bq5.summary.instantConfirmations}</div>
@@ -662,7 +706,7 @@ export class AnalyticsController {
     const dates = ${JSON.stringify(metrics.dates)};
     const bq5Dates = ${JSON.stringify(bq5.dates)};
     const instantByDay = ${JSON.stringify(bq5.instantByDay)};
-    const manualByDay = ${JSON.stringify(bq5.manualByDay)};
+    const failedByDay = ${JSON.stringify(bq5.failedByDay)};
     const crashes = ${JSON.stringify(metrics.crashes)};
     const bugs = ${JSON.stringify(metrics.bugs)};
     const latencyIssues = ${JSON.stringify(metrics.latencyIssues)};
@@ -734,8 +778,8 @@ export class AnalyticsController {
             borderRadius: 4,
           },
           {
-            label: 'Manual / Other',
-            data: manualByDay,
+            label: 'Failed / Other',
+            data: failedByDay,
             backgroundColor: 'rgba(107, 114, 128, 0.4)',
             borderColor: '#6b7280',
             borderWidth: 1,
