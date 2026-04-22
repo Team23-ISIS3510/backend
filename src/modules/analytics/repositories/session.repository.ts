@@ -5,7 +5,7 @@ import { TutoringSession } from '../../tutoring-session/entities/tutoring-sessio
 @Injectable()
 export class SessionRepository {
   private readonly logger = new Logger(SessionRepository.name);
-  private readonly COLLECTION = 'tutoringSessions';
+  private readonly COLLECTION = 'tutoring_sessions';
 
   constructor(private readonly firebaseService: FirebaseService) {}
 
