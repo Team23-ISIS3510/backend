@@ -65,11 +65,23 @@ export class AuthController {
     description:
       'Receives a Firebase idToken obtained after Google OAuth on the client. Automatically registers the user if they do not exist yet.',
   })
-  @ApiResponse({ status: 200, description: 'Google sign-in successful.' })
+  @ApiResponse({ status: 200, type: AuthResponseDto, description: 'Google sign-in successful. Returns tokens.' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired Google idToken.' })
+  @Post('google-login')
+  @HttpCode(HttpStatus.OK)
+  googleSignIn(@Body() dto: GoogleAuthDto) {
+    return this.authService.googleSignIn(dto.idToken);
+  }
+
+  @ApiOperation({
+    summary: 'Sign in with Google (alias)',
+    description: 'Alias for /auth/google-login. Use POST /auth/google-login instead.',
+  })
+  @ApiResponse({ status: 200, type: AuthResponseDto, description: 'Google sign-in successful. Returns tokens.' })
   @ApiResponse({ status: 401, description: 'Invalid or expired Google idToken.' })
   @Post('google')
   @HttpCode(HttpStatus.OK)
-  googleSignIn(@Body() dto: GoogleAuthDto) {
+  googleSignInAlias(@Body() dto: GoogleAuthDto) {
     return this.authService.googleSignIn(dto.idToken);
   }
 }
