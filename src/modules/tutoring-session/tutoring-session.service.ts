@@ -8,6 +8,7 @@ import { TutoringSession, TutoringSessionReview } from './entities/tutoring-sess
 import { Slot } from '../availability/slot.service';
 import { CourseHelper } from '../../common/helpers/course.helper';
 import { TutoringSessionOccupancyUpdateService } from './tutoring-session-occupancy-update.service';
+import { AnalyticsStudentBookingContextService } from '../analytics/analytics-student-booking-context.service';
 
 @Injectable()
 export class TutoringSessionService {
@@ -20,6 +21,7 @@ export class TutoringSessionService {
     private readonly notificationService: NotificationService,
     private readonly userService: UserService,
     private readonly occupancyUpdateService: TutoringSessionOccupancyUpdateService,
+    private readonly studentBookingContextService: AnalyticsStudentBookingContextService,
   ) {}
 
   async getSessionById(id: string): Promise<TutoringSession> {
@@ -106,6 +108,23 @@ export class TutoringSessionService {
     const id = await this.sessionRepository.save(undefined, finalData);
     this.logger.log(`Tutoring session created with ID: ${id}, Status: ${finalData.status}`);
     const session = await this.getSessionById(id);
+
+    const rawSource = (sessionData as any).bookingSource;
+    const bookingSource =
+      typeof rawSource === 'string' && rawSource.trim().length > 0
+        ? rawSource.trim().slice(0, 64)
+        : null;
+    void this.studentBookingContextService
+      .recordSessionBookingContext({
+        studentId: String(session.studentId),
+        sessionId: id,
+        bookedAt: session.createdAt ?? new Date(),
+        bookingSource,
+        instantAtCreate: !requiresApproval,
+      })
+      .catch((err) =>
+        this.logger.warn(`student_booking_context write failed for session ${id}: ${err}`),
+      );
 
     // === TRIGGER OCCUPANCY UPDATE ===
     // When a new session is created, recalculate occupancy for this tutor-subject

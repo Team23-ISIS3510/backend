@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
+import {
+  AnalyticsStudentBookingContextService,
+  StudentBookingContextRow,
+} from './analytics-student-booking-context.service';
 
 // Cancelled bookings are dropped because they do not represent realised demand.
 const EXCLUDED_STATUSES = new Set(['cancelled', 'declined', 'rejected']);
@@ -23,7 +27,7 @@ const MIN_GROUP_SIZE = 5;
  * BQ — Student-side feature correlation with booking frequency & repeat-session rate.
  *
  * Pipeline stages:
- *   1) Data extraction   — sessions, carousel events, tutor profiles within window
+ *   1) Data extraction   — sessions, student_booking_context, carousel events, tutor profiles
  *   2) Feature engineering — per-student binary feature-usage vector
  *   3) Outcome computation — bookingFrequency (sessions/week) and repeatSessionRate
  *   4) Correlation/uplift scoring — point-biserial correlation + raw & relative uplift
@@ -37,7 +41,10 @@ const MIN_GROUP_SIZE = 5;
 export class AnalyticsFeatureCorrelationService {
   private readonly logger = new Logger(AnalyticsFeatureCorrelationService.name);
 
-  constructor(private readonly firebaseService: FirebaseService) {}
+  constructor(
+    private readonly firebaseService: FirebaseService,
+    private readonly studentBookingContextService: AnalyticsStudentBookingContextService,
+  ) {}
 
   // ────────────────────────────────────────────────────────────────────────────
   // Public entry point
@@ -54,9 +61,10 @@ export class AnalyticsFeatureCorrelationService {
     );
 
     // 1) Data extraction
-    const [sessions, carouselBookingEvents] = await Promise.all([
+    const [sessions, carouselBookingEvents, bookingContextRows] = await Promise.all([
       this.fetchSessionsSince(analysisStart),
       this.fetchCarouselBookingEventsSince(analysisStart),
+      this.studentBookingContextService.fetchSince(analysisStart),
     ]);
 
     if (sessions.length === 0) {
@@ -67,9 +75,12 @@ export class AnalyticsFeatureCorrelationService {
       Array.from(new Set(sessions.map((s) => s.tutorId).filter(Boolean) as string[])),
     );
 
+    const bookingContextByStudent = this.aggregateBookingContextByStudent(bookingContextRows);
+
     // 2 + 3) Build per-student feature/outcome profiles
     const profiles = this.buildStudentProfiles(sessions, carouselBookingEvents, tutorRatings, {
       windowDays,
+      bookingContextByStudent,
     });
 
     if (profiles.length === 0) {
@@ -85,6 +96,7 @@ export class AnalyticsFeatureCorrelationService {
     const trendByFeature = this.computeTrend(
       sessions,
       carouselBookingEvents,
+      bookingContextRows,
       tutorRatings,
       analysisStart,
       now,
@@ -130,9 +142,10 @@ export class AnalyticsFeatureCorrelationService {
         },
         notes: [
           'Excludes sessions with status in [cancelled, declined, rejected].',
-          'Carousel attribution joins booking_completed events to sessions on ' +
-            '(tutorId, courseId) within ±15 minutes of session createdAt, since ' +
-            'carouselEvents does not carry studentId.',
+          'student_booking_context (written on session create) supplies bookingSource and instant-at-create; ' +
+            'carousel uses bookingSource=carousel when present, else legacy join to carouselEvents.',
+          'Instant booking uses instantAtCreate from context when present, else sessions with ' +
+            'scheduled+approved and no requestedAt (excludes request→accept flows that set requestedAt).',
         ],
       },
       cohort: {
@@ -168,6 +181,7 @@ export class AnalyticsFeatureCorrelationService {
         courseId: d.courseId ? String(d.courseId) : d.course ? String(d.course) : null,
         status: String(d.status ?? ''),
         tutorApprovalStatus: d.tutorApprovalStatus ? String(d.tutorApprovalStatus) : null,
+        requestedAt: safeToDate(d.requestedAt),
         createdAt,
         scheduledStart:
           safeToDate(d.scheduledStart) ??
@@ -233,11 +247,29 @@ export class AnalyticsFeatureCorrelationService {
   // Stage 2+3 — Feature engineering + outcome computation
   // ────────────────────────────────────────────────────────────────────────────
 
+  private aggregateBookingContextByStudent(
+    rows: StudentBookingContextRow[],
+  ): Map<string, { carouselFromApp: boolean; instantFromApp: boolean }> {
+    const map = new Map<string, { carouselFromApp: boolean; instantFromApp: boolean }>();
+    for (const r of rows) {
+      const cur = map.get(r.studentId) ?? { carouselFromApp: false, instantFromApp: false };
+      if (r.bookingSource && r.bookingSource.toLowerCase() === 'carousel') {
+        cur.carouselFromApp = true;
+      }
+      if (r.instantAtCreate) cur.instantFromApp = true;
+      map.set(r.studentId, cur);
+    }
+    return map;
+  }
+
   private buildStudentProfiles(
     sessions: SessionRow[],
     carouselEvents: CarouselBookingEvent[],
     tutorRatings: Map<string, number | null>,
-    opts: { windowDays: number },
+    opts: {
+      windowDays: number;
+      bookingContextByStudent?: Map<string, { carouselFromApp: boolean; instantFromApp: boolean }>;
+    },
   ): StudentProfile[] {
     // Index carousel events by (tutorId|courseId) for O(1) attribution lookup.
     const eventsByKey = new Map<string, number[]>();
@@ -255,10 +287,12 @@ export class AnalyticsFeatureCorrelationService {
     }
 
     const weeksInWindow = opts.windowDays / 7;
+    const bookingContextByStudent = opts.bookingContextByStudent ?? new Map();
 
     const profiles: StudentProfile[] = [];
     for (const [studentId, studentSessions] of byStudent.entries()) {
       const total = studentSessions.length;
+      const bc = bookingContextByStudent.get(studentId);
 
       // Distinct (tutor,course) pairs → basis for repeat-session rate.
       const tutorCoursePairs = new Set<string>();
@@ -282,13 +316,18 @@ export class AnalyticsFeatureCorrelationService {
 
       // ── Feature flags ──────────────────────────────────────────────────────
       const features: Record<FeatureKey, boolean> = {
-        used_carousel_booking: studentSessions.some((s) =>
-          hasCarouselAttribution(s, eventsByKey),
-        ),
+        used_carousel_booking:
+          (bc?.carouselFromApp ?? false) ||
+          studentSessions.some((s) => hasCarouselAttribution(s, eventsByKey)),
         used_returning_tutor: Array.from(tutorCourseCounts.values()).some((c) => c >= 2),
-        used_instant_booking: studentSessions.some(
-          (s) => s.tutorApprovalStatus === 'approved' && s.status === 'scheduled',
-        ),
+        used_instant_booking:
+          (bc?.instantFromApp ?? false) ||
+          studentSessions.some(
+            (s) =>
+              s.tutorApprovalStatus === 'approved' &&
+              s.status === 'scheduled' &&
+              !s.requestedAt,
+          ),
         used_high_rated_tutor: studentSessions.some((s) => {
           const r = s.tutorId ? tutorRatings.get(s.tutorId) ?? null : null;
           return r !== null && r > HIGH_RATING_THRESHOLD;
@@ -386,6 +425,7 @@ export class AnalyticsFeatureCorrelationService {
   private computeTrend(
     sessions: SessionRow[],
     carouselEvents: CarouselBookingEvent[],
+    bookingContextRows: StudentBookingContextRow[],
     tutorRatings: Map<string, number | null>,
     analysisStart: Date,
     analysisEnd: Date,
@@ -413,9 +453,14 @@ export class AnalyticsFeatureCorrelationService {
       const bucketEvents = carouselEvents.filter(
         (e) => e.timestampMs >= start.getTime() && e.timestampMs < end.getTime(),
       );
+      const bucketBookingContext = bookingContextRows.filter(
+        (r) => r.bookedAt >= start && r.bookedAt < end,
+      );
+      const bookingContextByStudent = this.aggregateBookingContextByStudent(bucketBookingContext);
 
       const profiles = this.buildStudentProfiles(bucketSessions, bucketEvents, tutorRatings, {
         windowDays: bucketDays,
+        bookingContextByStudent,
       });
       if (profiles.length === 0) {
         for (const def of FEATURE_DEFINITIONS) {
@@ -509,8 +554,8 @@ const FEATURE_DEFINITIONS: FeatureDefinition[] = [
     key: 'used_carousel_booking',
     label: 'Carousel-driven booking',
     description:
-      'Student made at least one booking attributable to the "Available Now" tutor carousel ' +
-      '(matched via a carouselEvents booking_completed event within ±15 minutes).',
+      'Student had bookingSource=carousel on at least one in-window session (student_booking_context), ' +
+      'or legacy attribution via carouselEvents booking_completed within ±15 minutes of session createdAt.',
   },
   {
     key: 'used_returning_tutor',
@@ -523,8 +568,8 @@ const FEATURE_DEFINITIONS: FeatureDefinition[] = [
     key: 'used_instant_booking',
     label: 'Instant booking (auto-approved)',
     description:
-      'Student has at least one session that was auto-approved and scheduled without manual tutor confirmation ' +
-      '(tutorApprovalStatus=approved AND status=scheduled).',
+      'Student has at least one in-window session recorded with instantAtCreate in student_booking_context, ' +
+      'or a scheduled+approved session with no requestedAt (legacy rows where the request-approval queue was not used).',
   },
   {
     key: 'used_high_rated_tutor',
@@ -554,6 +599,8 @@ interface SessionRow {
   courseId: string | null;
   status: string;
   tutorApprovalStatus: string | null;
+  /** Set when the session went through the request-approval flow (excludes pure instant create). */
+  requestedAt: Date | null;
   createdAt: Date;
   scheduledStart: Date | null;
 }

@@ -3,6 +3,7 @@ import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
 import { AnalyticsFeatureCorrelationService } from './analytics-feature-correlation.service';
+import { AnalyticsStudentBookingContextService } from './analytics-student-booking-context.service';
 import { FirebaseModule } from '../firebase/firebase.module';
 import { AvailabilityModule } from '../availability/availability.module';
 import { UserModule } from '../user/user.module';
@@ -20,6 +21,7 @@ import { AvailabilityOccupancyUpdateService } from '../availability/availability
     AnalyticsService,
     AnalyticsBookingService,
     AnalyticsFeatureCorrelationService,
+    AnalyticsStudentBookingContextService,
     OccupancyRepository,
     AnalyticsOccupancyUpdateService,
     TutoringSessionOccupancyUpdateService,
@@ -29,6 +31,7 @@ import { AvailabilityOccupancyUpdateService } from '../availability/availability
     AnalyticsService,
     AnalyticsBookingService,
     AnalyticsFeatureCorrelationService,
+    AnalyticsStudentBookingContextService,
     OccupancyRepository,
     AnalyticsOccupancyUpdateService,
     TutoringSessionOccupancyUpdateService,
