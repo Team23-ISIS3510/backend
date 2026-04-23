@@ -414,6 +414,77 @@ function buildUpcomingSessions(student) {
   ];
 }
 
+function buildHistory(studentId) {
+  const now = ts(new Date());
+  const daysAgo = (d) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
+  return [
+    {
+      id: 'demo-hist-001',
+      data: {
+        tutorId: 'demo-tutor-001',
+        studentId,
+        courseId: 'demo-course-calculo',
+        course: 'Cálculo Diferencial',
+        tutorName: 'Ana García',
+        tutorEmail: 'ana.garcia.demo@uniandes.edu.co',
+        scheduledStart: ts(daysAgo(5)),
+        scheduledEnd:   ts(new Date(daysAgo(5).getTime() + 60 * 60 * 1000)),
+        status: 'completed',
+        tutorApprovalStatus: 'approved',
+        location: 'Virtual',
+        price: 20,
+        paymentStatus: 'paid',
+        requiresApproval: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+    {
+      id: 'demo-hist-002',
+      data: {
+        tutorId: 'demo-tutor-001',
+        studentId,
+        courseId: 'demo-course-calculo',
+        course: 'Cálculo Diferencial',
+        tutorName: 'Ana García',
+        tutorEmail: 'ana.garcia.demo@uniandes.edu.co',
+        scheduledStart: ts(daysAgo(3)),
+        scheduledEnd:   ts(new Date(daysAgo(3).getTime() + 60 * 60 * 1000)),
+        status: 'completed',
+        tutorApprovalStatus: 'approved',
+        location: 'Virtual',
+        price: 20,
+        paymentStatus: 'paid',
+        requiresApproval: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+    {
+      id: 'demo-hist-003',
+      data: {
+        tutorId: 'demo-tutor-002',
+        studentId,
+        courseId: 'demo-course-calculo',
+        course: 'Cálculo Diferencial',
+        tutorName: 'Luis Mora',
+        tutorEmail: 'luis.mora.demo@uniandes.edu.co',
+        scheduledStart: ts(daysAgo(7)),
+        scheduledEnd:   ts(new Date(daysAgo(7).getTime() + 60 * 60 * 1000)),
+        status: 'completed',
+        tutorApprovalStatus: 'approved',
+        location: 'Bloque ML, Sala 204',
+        price: 18,
+        paymentStatus: 'paid',
+        requiresApproval: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+  ];
+}
+
 function buildCarouselEvents() {
   const now = new Date();
   const minutesAgo = (m) => new Date(now.getTime() - m * 60 * 1000);
