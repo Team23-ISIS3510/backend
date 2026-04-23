@@ -20,6 +20,7 @@ export interface AvailableTutorResult {
     endDateTime: Date;
     location?: string;
     course?: string;
+    parentAvailabilityId?: string;
   } | null;
   availableSlotsCount: number;
 }
@@ -260,6 +261,7 @@ export class AnalyticsService {
               endDateTime: new Date(next.endDateTime),
               location: next.location,
               course: next.course,
+              parentAvailabilityId: next.id,
             },
             availableSlotsCount: active.length,
           });
@@ -901,6 +903,7 @@ export class AnalyticsService {
             endDateTime: new Date(next.endDateTime),
             location: next.location,
             course: next.course,
+            parentAvailabilityId: next.id,
           },
           availableSlotsCount: active.length,
           bookingCount,
@@ -916,14 +919,15 @@ export class AnalyticsService {
 
   /**
    * BQ5: Get booking success rate data
-   * Instant booking = tutorApprovalStatus === 'approved' AND status === 'scheduled'
-   * Returns summary stats + 7-day daily breakdown for instant vs manual bookings
+   * Instant attempt  = tutorApprovalStatus === 'approved'
+   * Succeeded instant = tutorApprovalStatus === 'approved' AND status in ['scheduled', 'completed']
+   * Success rate = succeededInstant / totalInstantAttempts
    */
   async getBookingSuccessData(): Promise<{
-    summary: { totalBookings: number; instantConfirmations: number; successRate: number };
+    summary: { totalInstantAttempts: number; instantConfirmations: number; successRate: number };
     dates: string[];
     instantByDay: number[];
-    manualByDay: number[];
+    failedByDay: number[];
   }> {
     const db = this.firebaseService.getFirestore();
     const snapshot = await db.collection('tutoring_sessions').get();
@@ -933,7 +937,7 @@ export class AnalyticsService {
 
     const dates: string[] = [];
     const instantByDay = new Map<string, number>();
-    const manualByDay = new Map<string, number>();
+    const failedByDay = new Map<string, number>();
 
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
@@ -941,45 +945,48 @@ export class AnalyticsService {
       const dateStr = date.toISOString().split('T')[0];
       dates.push(dateStr);
       instantByDay.set(dateStr, 0);
-      manualByDay.set(dateStr, 0);
+      failedByDay.set(dateStr, 0);
     }
 
-    let totalBookings = 0;
+    let totalInstantAttempts = 0;
     let instantConfirmations = 0;
 
     snapshot.forEach((doc) => {
       const data = doc.data();
-      totalBookings++;
 
-      const isInstant =
-        data.tutorApprovalStatus === 'approved' && data.status === 'scheduled';
-      if (isInstant) instantConfirmations++;
+      const isInstantAttempt = data.tutorApprovalStatus === 'approved';
+      if (!isInstantAttempt) return;
+
+      totalInstantAttempts++;
+
+      const succeeded = data.status === 'scheduled' || data.status === 'completed';
+      if (succeeded) instantConfirmations++;
 
       const createdAt = this.safeToDate(data.createdAt);
       if (createdAt && createdAt >= sevenDaysAgo) {
         const dateStr = createdAt.toISOString().split('T')[0];
-        if (isInstant) {
+        if (succeeded) {
           instantByDay.set(dateStr, (instantByDay.get(dateStr) || 0) + 1);
         } else {
-          manualByDay.set(dateStr, (manualByDay.get(dateStr) || 0) + 1);
+          failedByDay.set(dateStr, (failedByDay.get(dateStr) || 0) + 1);
         }
       }
     });
 
     const successRate =
-      totalBookings > 0
-        ? Math.round((instantConfirmations / totalBookings) * 10000) / 100
+      totalInstantAttempts > 0
+        ? Math.round((instantConfirmations / totalInstantAttempts) * 10000) / 100
         : 0;
 
     this.logger.log(
-      `BQ5: Total: ${totalBookings}, Instant: ${instantConfirmations}, Rate: ${successRate}%`,
+      `BQ5: Instant attempts: ${totalInstantAttempts}, Succeeded: ${instantConfirmations}, Rate: ${successRate}%`,
     );
 
     return {
-      summary: { totalBookings, instantConfirmations, successRate },
+      summary: { totalInstantAttempts, instantConfirmations, successRate },
       dates,
       instantByDay: dates.map((d) => instantByDay.get(d) || 0),
-      manualByDay: dates.map((d) => manualByDay.get(d) || 0),
+      failedByDay: dates.map((d) => failedByDay.get(d) || 0),
     };
   }
 
@@ -1152,9 +1159,10 @@ export class AnalyticsService {
    * - Crashes: app crashes
    * - Bugs: user-reported bugs
    * - Latency Issues: API requests that exceeded 2 second threshold
+   * - Cancellation Rate: % of confirmed bookings cancelled <12h before start
    */
   async getDashboardData(): Promise<{
-    summary: { crashes: number; bugs: number; latencyIssues: number };
+    summary: { crashes: number; bugs: number; latencyIssues: number; cancellationRate: number; totalCancellations: number };
     dates: string[];
     crashes: number[];
     bugs: number[];
@@ -1216,8 +1224,11 @@ export class AnalyticsService {
       }
     });
 
+    // Calculate cancellation rate
+    const { cancellationRate, totalCancellations, totalConfirmed } = await this.calculateCancellationRate();
+
     this.logger.log(
-      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}`,
+      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}, Cancellations: ${totalCancellations}/${totalConfirmed} (${cancellationRate}%)`,
     );
 
     return {
@@ -1225,11 +1236,69 @@ export class AnalyticsService {
         crashes: totalCrashes,
         bugs: totalBugs,
         latencyIssues: totalLatencyIssues,
+        cancellationRate,
+        totalCancellations,
       },
       dates,
       crashes: dates.map((d) => crashesByDay.get(d) || 0),
       bugs: dates.map((d) => bugsByDay.get(d) || 0),
       latencyIssues: dates.map((d) => latencyIssuesByDay.get(d) || 0),
     };
+  }
+
+  /**
+   * Calculate cancellation rate for confirmed bookings
+   * Only counts cancellations that happened < 12 hours before scheduled start
+   */
+  private async calculateCancellationRate(): Promise<{
+    cancellationRate: number;
+    totalCancellations: number;
+    totalConfirmed: number;
+  }> {
+    try {
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db.collection('tutoring_sessions').where('status', '==', 'confirmed').get();
+
+      let totalConfirmed = 0;
+      let totalCancellations = 0;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        totalConfirmed++;
+
+        // Check if session was cancelled
+        if (data.cancelledAt) {
+          const scheduledStart = data.scheduledStart?.toDate
+            ? data.scheduledStart.toDate()
+            : new Date(data.scheduledStart);
+          
+          const cancelledAt = data.cancelledAt?.toDate
+            ? data.cancelledAt.toDate()
+            : new Date(data.cancelledAt);
+
+          // Calculate hours between cancellation and scheduled start
+          const hoursBeforeStart = (scheduledStart.getTime() - cancelledAt.getTime()) / (1000 * 60 * 60);
+
+          // Only count if cancelled less than 12 hours before start
+          if (hoursBeforeStart < 12 && hoursBeforeStart > 0) {
+            totalCancellations++;
+          }
+        }
+      });
+
+      const cancellationRate =
+        totalConfirmed > 0
+          ? Math.round((totalCancellations / totalConfirmed) * 10000) / 100
+          : 0;
+
+      this.logger.log(
+        `Cancellation Rate: ${totalCancellations}/${totalConfirmed} = ${cancellationRate}%`,
+      );
+
+      return { cancellationRate, totalCancellations, totalConfirmed };
+    } catch (error) {
+      this.logger.error('Error calculating cancellation rate:', error);
+      return { cancellationRate: 0, totalCancellations: 0, totalConfirmed: 0 };
+    }
   }
 }

@@ -247,7 +247,6 @@ export class TutoringSessionRepository {
         .orderBy('scheduledStart', 'desc')
         .limit(limit)
         .get();
-      console.log("Snapshot", snapshot.docs)
       const sessions: TutoringSession[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
@@ -552,10 +551,10 @@ export class TutoringSessionRepository {
         }
       });
 
-      // Also search in alternative collection name (tutoringSessions) for legacy data
+      // Also search in alternative collection name (tutoring_sessions) for legacy data
       try {
         const snapshot2 = await db
-          .collection('tutoringSessions')
+          .collection('tutoring_sessions')
           .where('tutorId', '==', tutorId)
           .get();
 
@@ -609,10 +608,10 @@ export class TutoringSessionRepository {
         }
       });
 
-      // Also search in alternative collection name (tutoringSessions) for legacy data
+      // Also search in alternative collection name (tutoring_sessions) for legacy data
       try {
         const snapshot2 = await db
-          .collection('tutoringSessions')
+          .collection('tutoring_sessions')
           .where('tutorId', '==', tutorId)
           .get();
 
