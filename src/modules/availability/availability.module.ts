@@ -7,9 +7,10 @@ import { FirebaseModule } from '../firebase/firebase.module';
 import { CalendarModule } from '../calendar/calendar.module';
 import { TutoringSessionModule } from '../tutoring-session/tutoring-session.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { UserModule } from '../user/user.module';
 
 @Module({
-  imports: [FirebaseModule, CalendarModule, TutoringSessionModule, forwardRef(() => AnalyticsModule)],
+  imports: [FirebaseModule, CalendarModule, TutoringSessionModule, UserModule, forwardRef(() => AnalyticsModule)],
   controllers: [AvailabilityController],
   providers: [AvailabilityService, AvailabilityRepository, SlotService],
   exports: [AvailabilityService, AvailabilityRepository, SlotService],

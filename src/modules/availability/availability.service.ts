@@ -7,6 +7,7 @@ import { CalendarService } from '../../modules/calendar/calendar.service';
 import { SlotService } from '../../modules/availability/slot.service';
 import { Slot } from '../../modules/availability/slot.service';
 import { AvailabilityOccupancyUpdateService } from './availability-occupancy-update.service';
+import { UserService } from '../user/user.service';
 
 @Injectable()
 export class AvailabilityService {
@@ -17,7 +18,35 @@ export class AvailabilityService {
     private readonly calendarService: CalendarService,
     private readonly slotService: SlotService,
     private readonly occupancyUpdateService: AvailabilityOccupancyUpdateService,
+    private readonly userService: UserService,
   ) {}
+
+  private async resolveTutorIdentifiers(tutorId: string): Promise<string[]> {
+    const normalized = tutorId.trim();
+    if (!normalized) {
+      return [];
+    }
+
+    const ids = new Set<string>([normalized]);
+
+    try {
+      if (normalized.includes('@')) {
+        const userByEmail = await this.userService.getUserByEmail(normalized);
+        if (userByEmail?.id) {
+          ids.add(userByEmail.id);
+        }
+      } else {
+        const userById = await this.userService.findByIdOrNull(normalized);
+        if (userById?.email) {
+          ids.add(userById.email);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Could not resolve tutor aliases for ${normalized}: ${error.message}`);
+    }
+
+    return Array.from(ids);
+  }
 
   async getAvailabilityById(id: string): Promise<AvailabilityResponseDto | null> {
     try {
@@ -42,15 +71,44 @@ export class AvailabilityService {
         const start = new Date(startDate);
         const end = new Date(endDate);
         const effectiveLimit = limit ?? 200;
-        availabilities = await this.availabilityRepository.findByTutorAndDateRange(
-          tutorId,
-          start,
-          end,
-          effectiveLimit,
-        );
+        const tutorIdentifiers = await this.resolveTutorIdentifiers(tutorId);
+        const merged = new Map<string, Availability>();
+
+        for (const tutorIdentifier of tutorIdentifiers) {
+          const partial = await this.availabilityRepository.findByTutorAndDateRange(
+            tutorIdentifier,
+            start,
+            end,
+            effectiveLimit,
+          );
+          partial.forEach((item) => {
+            if (item.id) {
+              merged.set(item.id, item);
+            }
+          });
+        }
+
+        availabilities = Array.from(merged.values())
+          .sort((a, b) => (a.startDateTime?.getTime() ?? 0) - (b.startDateTime?.getTime() ?? 0))
+          .slice(0, effectiveLimit);
       } else if (tutorId) {
         // Get availabilities for specific tutor
-        availabilities = await this.availabilityRepository.findByTutor(tutorId, limit);
+        const effectiveLimit = limit ?? 50;
+        const tutorIdentifiers = await this.resolveTutorIdentifiers(tutorId);
+        const merged = new Map<string, Availability>();
+
+        for (const tutorIdentifier of tutorIdentifiers) {
+          const partial = await this.availabilityRepository.findByTutor(tutorIdentifier, effectiveLimit);
+          partial.forEach((item) => {
+            if (item.id) {
+              merged.set(item.id, item);
+            }
+          });
+        }
+
+        availabilities = Array.from(merged.values())
+          .sort((a, b) => (a.startDateTime?.getTime() ?? 0) - (b.startDateTime?.getTime() ?? 0))
+          .slice(0, effectiveLimit);
       } else if (course) {
         // Get availabilities by course
         availabilities = await this.availabilityRepository.findByCourse(course, limit);
@@ -180,12 +238,38 @@ export class AvailabilityService {
     }
   }
 
-  async deleteAvailability(googleEventId: string): Promise<void> {
+  async deleteAvailability(availabilityId: string): Promise<void> {
     try {
-      await this.availabilityRepository.delete(googleEventId);
-      this.logger.log(`Availability deleted from Firebase: ${googleEventId}`);
+      const existing = await this.availabilityRepository.findById(availabilityId);
+      if (!existing) {
+        throw new NotFoundException(`Availability with ID ${availabilityId} not found`);
+      }
+
+      await this.availabilityRepository.delete(availabilityId);
+      this.logger.log(`Availability deleted from Firebase: ${availabilityId}`);
     } catch (error) {
       this.logger.error('Error deleting availability:', error);
+      throw error;
+    }
+  }
+
+  async deleteAvailabilitiesByTutor(tutorId: string): Promise<number> {
+    try {
+      if (!tutorId || tutorId.trim() === '') {
+        throw new Error('tutorId is required');
+      }
+
+      const tutorIdentifiers = await this.resolveTutorIdentifiers(tutorId);
+      let deletedCount = 0;
+
+      for (const tutorIdentifier of tutorIdentifiers) {
+        deletedCount += await this.availabilityRepository.deleteByTutorId(tutorIdentifier);
+      }
+
+      this.logger.log(`Deleted ${deletedCount} availabilities for tutor ${tutorId} (aliases: ${tutorIdentifiers.join(', ')})`);
+      return deletedCount;
+    } catch (error) {
+      this.logger.error(`Error deleting availabilities for tutor ${tutorId}:`, error);
       throw error;
     }
   }

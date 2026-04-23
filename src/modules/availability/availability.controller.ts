@@ -508,6 +508,87 @@ export class AvailabilityController {
     }
   }
 
+  @ApiOperation({ summary: 'Delete availability by availabilityId (Firebase only)' })
+  @ApiResponse({ status: 200, description: 'Availability deleted successfully.' })
+  @Delete(':availabilityId')
+  async deleteAvailabilityById(@Param('availabilityId') availabilityId: string) {
+    try {
+      if (!availabilityId) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'availabilityId es requerido',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Delete availability requested: ${availabilityId}`);
+
+      await this.availabilityService.deleteAvailability(availabilityId);
+
+      return {
+        success: true,
+        message: 'Disponibilidad eliminada exitosamente',
+      };
+    } catch (error) {
+      this.logger.error('Error deleting availability by id:', error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        {
+          success: false,
+          error: error.message || 'Error eliminando disponibilidad',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiOperation({ summary: 'Delete all availabilities for a tutor' })
+  @ApiResponse({ status: 200, description: 'Availabilities deleted successfully.' })
+  @Delete('tutor/:tutorId')
+  async deleteAvailabilitiesByTutor(@Param('tutorId') tutorId: string) {
+    try {
+      if (!tutorId) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'tutorId es requerido',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Delete all availabilities requested for tutor: ${tutorId}`);
+
+      const deletedCount = await this.availabilityService.deleteAvailabilitiesByTutor(tutorId);
+
+      return {
+        success: true,
+        message: 'Disponibilidades eliminadas exitosamente',
+        deletedCount,
+      };
+    } catch (error) {
+      this.logger.error('Error deleting availabilities by tutor:', error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        {
+          success: false,
+          error: error.message || 'Error eliminando disponibilidades del tutor',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @ApiOperation({ summary: 'Get availability for multiple tutors' })
   @ApiResponse({ status: 200, description: 'Multiple tutors availability retrieved successfully.' })
   @ApiBody({ schema: { example: { tutorIds: ['tutor1Id', 'tutor2Id'], startDate: '2099-01-01', endDate: '2099-01-07', limit: 100 } } })
