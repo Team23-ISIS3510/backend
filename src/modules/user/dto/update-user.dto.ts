@@ -1,4 +1,4 @@
-import { IsString, IsBoolean, IsArray, IsOptional, IsNumber, Min, Max } from 'class-validator';
+import { IsString, IsBoolean, IsArray, IsOptional, IsNumber, Min, Max, IsUrl } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateUserDto {
@@ -45,4 +45,13 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsUrl()
+  @IsOptional()
+  @ApiProperty({
+    example: 'https://example.com/profile.jpg',
+    required: false,
+    description: 'URL to the user profile picture',
+  })
+  profilePictureUrl?: string;
 }

@@ -34,6 +34,9 @@ export class UserResponseDto {
   @ApiProperty({ example: 'I am a dedicated student...', required: false })
   description?: string;
 
+  @ApiProperty({example: 'https://example.com/profile.jpg', required: false, description: 'URL to the user profile picture'})
+  profilePictureUrl?: string;
+
   static fromEntity(user: User): UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = user.id;
@@ -49,6 +52,7 @@ export class UserResponseDto {
     dto.description = user.description;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;
+    dto.profilePictureUrl = user.profilePictureUrl;
     return dto;
   }
 }

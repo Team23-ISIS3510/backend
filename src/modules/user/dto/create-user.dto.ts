@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsBoolean, IsArray, IsOptional } from 'class-validator';
+import { IsString, IsEmail, IsBoolean, IsArray, IsOptional, IsUrl } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateUserDto {
@@ -28,4 +28,13 @@ export class CreateUserDto {
   @IsString({ each: true })
   @IsOptional()
   courses?: string[];
+
+  @IsUrl()
+  @IsOptional()
+  @ApiProperty({
+    example: 'https://example.com/profile.jpg',
+    required: false,
+    description: 'URL to the user profile picture',
+  })
+  profilePictureUrl?: string;
 }
