@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import * as admin from 'firebase-admin';
 import { FirebaseService } from '../firebase/firebase.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
 import { AcademicService } from '../academic/academic.service';
@@ -425,6 +426,265 @@ export class TutorService {
       return courses;
     } catch (error) {
       this.logger.error(`Error fetching courses for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a tutor application for a course
+   * Stores application in tutorApplications collection
+   */
+  async createCourseApplication(
+    tutorId: string,
+    courseId: string,
+    notes?: string,
+  ) {
+    try {
+      this.logger.log(`Creating course application: tutor ${tutorId} for course ${courseId}`);
+
+      const db = this.firebaseService.getFirestore();
+
+      // Get tutor details
+      const tutor = await this.getTutorById(tutorId);
+      if (!tutor) {
+        throw new NotFoundException(`Tutor ${tutorId} not found`);
+      }
+
+      // Get course details
+      const course = await this.academicService.getCourseById(courseId);
+      if (!course) {
+        throw new NotFoundException(`Course ${courseId} not found`);
+      }
+
+      // Check if tutor already applied for this course (just log it, don't block)
+      try {
+        const existingQuery = await db
+          .collection('tutorApplications')
+          .where('tutorId', '==', tutorId)
+          .where('courseId', '==', courseId)
+          .limit(1)
+          .get();
+
+        if (!existingQuery.empty) {
+          const existingApp = existingQuery.docs[0].data();
+          if (existingApp.status === 'pending') {
+            this.logger.warn(`Tutor ${tutorId} already has pending application for course ${courseId}`);
+            throw new Error(
+              `You already have a pending application for this course`,
+            );
+          }
+        }
+      } catch (checkError) {
+        if (checkError.message.includes('pending')) {
+          throw checkError;
+        }
+        this.logger.warn(`Could not check existing applications: ${checkError.message}`);
+      }
+
+      // Create application
+      const application = {
+        tutorId,
+        tutorEmail: tutor.email,
+        tutorName: tutor.name,
+        courseId,
+        courseName: course.name,
+        courseCode: course.code,
+        status: 'pending',
+        appliedAt: new Date(),
+        notes: notes || null,
+      };
+
+      const docRef = await db.collection('tutorApplications').add(application);
+
+      this.logger.log(
+        `Course application created: ${docRef.id} for tutor ${tutorId}`,
+      );
+
+      return {
+        id: docRef.id,
+        ...application,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error creating course application for tutor ${tutorId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get all applications for a tutor
+   */
+  async getTutorApplications(tutorId: string) {
+    try {
+      this.logger.log(`Fetching applications for tutor: ${tutorId}`);
+
+      const db = this.firebaseService.getFirestore();
+
+      const snapshot = await db
+        .collection('tutorApplications')
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      const applications = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // Sort client-side by appliedAt descending
+      applications.sort((a: any, b: any) => {
+        const dateA = a.appliedAt instanceof Date ? a.appliedAt : new Date(a.appliedAt);
+        const dateB = b.appliedAt instanceof Date ? b.appliedAt : new Date(b.appliedAt);
+        return dateB.getTime() - dateA.getTime();
+      });
+
+      this.logger.log(
+        `Found ${applications.length} applications for tutor ${tutorId}`,
+      );
+
+      return applications;
+    } catch (error) {
+      this.logger.error(
+        `Error fetching applications for tutor ${tutorId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get all pending applications (admin only)
+   */
+  async getPendingApplications() {
+    try {
+      this.logger.log(`Fetching all pending applications`);
+
+      const db = this.firebaseService.getFirestore();
+
+      const snapshot = await db
+        .collection('tutorApplications')
+        .where('status', '==', 'pending')
+        .get();
+
+      const applications = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // Sort client-side by appliedAt descending
+      applications.sort((a: any, b: any) => {
+        const dateA = a.appliedAt instanceof Date ? a.appliedAt : new Date(a.appliedAt);
+        const dateB = b.appliedAt instanceof Date ? b.appliedAt : new Date(b.appliedAt);
+        return dateB.getTime() - dateA.getTime();
+      });
+
+      this.logger.log(`Found ${applications.length} pending applications`);
+
+      return applications;
+    } catch (error) {
+      this.logger.error(`Error fetching pending applications:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Approve a tutor application and add course to tutor's courses
+   */
+  async approveApplication(applicationId: string, reviewedBy: string) {
+    try {
+      this.logger.log(`Approving application: ${applicationId}`);
+
+      const db = this.firebaseService.getFirestore();
+
+      // Get application
+      const appDoc = await db
+        .collection('tutorApplications')
+        .doc(applicationId)
+        .get();
+
+      if (!appDoc.exists) {
+        throw new NotFoundException(`Application ${applicationId} not found`);
+      }
+
+      const appData = appDoc.data() as any;
+      const { tutorId, courseId } = appData;
+
+      // Add course to tutor's courses array
+      const userRef = db.collection('users').doc(tutorId);
+      await userRef.update({
+        courses: admin.firestore.FieldValue.arrayUnion(courseId),
+      });
+
+      // Update application status
+      await appDoc.ref.update({
+        status: 'approved',
+        reviewedAt: new Date(),
+        reviewedBy,
+      });
+
+      this.logger.log(
+        `Application ${applicationId} approved. Course ${courseId} added to tutor ${tutorId}`,
+      );
+
+      return {
+        id: applicationId,
+        ...appData,
+        status: 'approved',
+        reviewedAt: new Date(),
+        reviewedBy,
+      };
+    } catch (error) {
+      this.logger.error(`Error approving application ${applicationId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reject a tutor application
+   */
+  async rejectApplication(
+    applicationId: string,
+    rejectionReason: string,
+    reviewedBy: string,
+  ) {
+    try {
+      this.logger.log(`Rejecting application: ${applicationId}`);
+
+      const db = this.firebaseService.getFirestore();
+
+      // Get application
+      const appDoc = await db
+        .collection('tutorApplications')
+        .doc(applicationId)
+        .get();
+
+      if (!appDoc.exists) {
+        throw new NotFoundException(`Application ${applicationId} not found`);
+      }
+
+      const appData = appDoc.data();
+
+      // Update application status
+      await appDoc.ref.update({
+        status: 'rejected',
+        rejectionReason,
+        reviewedAt: new Date(),
+        reviewedBy,
+      });
+
+      this.logger.log(`Application ${applicationId} rejected`);
+
+      return {
+        id: applicationId,
+        ...appData,
+        status: 'rejected',
+        rejectionReason,
+        reviewedAt: new Date(),
+        reviewedBy,
+      };
+    } catch (error) {
+      this.logger.error(`Error rejecting application ${applicationId}:`, error);
       throw error;
     }
   }
