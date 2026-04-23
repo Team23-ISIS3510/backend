@@ -36,9 +36,10 @@ export class AvailabilityResponseDto {
       dto.course = entity.course;
       dto.color = entity.color;
       dto.recurring = entity.recurring;
-      dto.day = days[start.getDay()];
-      dto.startTime = start.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-      dto.endTime = end.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+      dto.day = days[start.getUTCDay()];
+      // Use UTC time for consistency
+      dto.startTime = `${String(start.getUTCHours()).padStart(2, '0')}:${String(start.getUTCMinutes()).padStart(2, '0')}`;
+      dto.endTime = `${String(end.getUTCHours()).padStart(2, '0')}:${String(end.getUTCMinutes()).padStart(2, '0')}`;
       dto.date = start.toISOString().split('T')[0];
   
       return dto;
