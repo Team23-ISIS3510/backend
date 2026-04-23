@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nest
 import type { Request, Response } from 'express';
 import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
+import { AnalyticsFeatureCorrelationService } from './analytics-feature-correlation.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { CreateBugReportDto } from './dto/bug-report.dto';
 import { CreateCarouselEventDto } from './dto/carousel-event.dto';
@@ -54,7 +55,8 @@ export class AnalyticsController {
 
   constructor(
     private readonly analyticsService: AnalyticsService,
-     private readonly analyticsBookingService: AnalyticsBookingService,
+    private readonly analyticsBookingService: AnalyticsBookingService,
+    private readonly featureCorrelationService: AnalyticsFeatureCorrelationService,
     private readonly userService: UserService,
     private readonly sessionService: TutoringSessionService,
   ) {}
@@ -379,11 +381,47 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ-FC: GET /analytics/feature-correlation
+   *
+   * Answers: "Which student-side features correlate most strongly with higher booking
+   * frequency and repeat session rates over time?"
+   *
+   * Pipeline: extract → feature-engineer → compute outcomes → score correlation+uplift
+   * → rank → shape for dashboard. See AnalyticsFeatureCorrelationService for details.
+   */
+  @Get('feature-correlation')
+  @ApiOperation({
+    summary: 'BQ: Student-side features vs booking frequency & repeat-session rate',
+    description:
+      'For each student-side feature (carousel booking, returning-tutor, instant booking, high-rated-tutor, ' +
+      'multi-course, short-notice), reports point-biserial correlation and uplift against two outcomes: ' +
+      'sessions/week per student, and repeat-session rate. Includes 4-bucket trend for stability over time.',
+  })
+  @ApiQuery({
+    name: 'windowDays',
+    required: false,
+    type: Number,
+    description: 'Analysis window size in days (default 365, min 30, max 1095).',
+  })
+  @ApiResponse({ status: 200, description: 'Feature correlation report' })
+  async getFeatureCorrelation(@Query('windowDays') windowDays?: string) {
+    let parsed = windowDays !== undefined ? parseInt(windowDays, 10) : 365;
+    if (!Number.isFinite(parsed)) {
+      throw new BadRequestException('windowDays must be an integer');
+    }
+    // Clamp to a sane range so a caller can't accidentally scan the full collection forever.
+    parsed = Math.max(30, Math.min(1095, parsed));
+
+    const report = await this.featureCorrelationService.getStudentFeatureCorrelation(parsed);
+    return { success: true, ...report };
+  }
+
+  /**
    * BQ1: GET /analytics/dashboard
-   * 
+   *
    * Returns an HTML dashboard with minimalist design visualizing:
    * - System Stability: Crashes, User-Reported Bugs, and Latency Issues (7-day line chart)
-   * 
+   *
    * Latency Issue: API request that exceeded 2-second threshold
    */
   @Get('dashboard')
@@ -395,11 +433,20 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bq2] = await Promise.all([
+    const [metrics, bq5, bq2, bqFc] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
       this.analyticsService.getBQ2DashboardData(),
+      this.featureCorrelationService.getStudentFeatureCorrelation(365),
     ]);
+
+    // Rank by abs(correlation) vs booking frequency for the chart; keep all for the table.
+    const bqFcRanked = [...bqFc.features]
+      .filter((f) => !f.lowSupport)
+      .sort(
+        (a, b) =>
+          Math.abs(b.bookingFrequency.correlation) - Math.abs(a.bookingFrequency.correlation),
+      );
 
     const html = `
 <!DOCTYPE html>
@@ -630,6 +677,74 @@ export class AnalyticsController {
         </div>
       </div>
     </div>
+
+    <!-- BQ-FC: Student Feature Correlation with Booking Outcomes -->
+    <div class="section">
+      <h1 class="section-title">Student Feature Correlation (BQ)</h1>
+      <p style="color:var(--muted); margin-top:-0.75rem; margin-bottom:1.25rem; max-width:70ch">
+        Which student-side features correlate most strongly with higher booking frequency and repeat-session
+        rates? Cohort: <strong>${bqFc.cohort.totalStudents}</strong> students,
+        <strong>${bqFc.cohort.totalSessions}</strong> sessions over the last
+        <strong>${bqFc.meta.analysisWindowDays}</strong> days.
+        Avg frequency: <strong>${bqFc.cohort.averageBookingFrequency}</strong> sessions/week ·
+        Avg repeat rate: <strong>${(bqFc.cohort.averageRepeatSessionRate * 100).toFixed(1)}%</strong>.
+        Scoring: point-biserial correlation + uplift (mean_with − mean_without).
+      </p>
+
+      <div class="stats-grid" style="grid-template-columns: 1fr 1fr">
+        <div class="chart-card">
+          <h2>Correlation with Booking Frequency</h2>
+          <canvas id="bqFcFreqChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h2>Correlation with Repeat-Session Rate</h2>
+          <canvas id="bqFcRepeatChart"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-top:1.5rem">
+        <h2>Uplift Over Time — Top Feature (Booking Frequency)</h2>
+        <canvas id="bqFcTrendChart"></canvas>
+      </div>
+
+      <div class="chart-card" style="margin-top:1.5rem; overflow-x:auto">
+        <h2>Ranked Features</h2>
+        <table style="width:100%; border-collapse:collapse; font-size:0.875rem">
+          <thead>
+            <tr style="text-align:left; color:var(--muted); border-bottom:1px solid #e4e4e7">
+              <th style="padding:0.5rem 0.5rem">#</th>
+              <th style="padding:0.5rem 0.5rem">Feature</th>
+              <th style="padding:0.5rem 0.5rem">Adoption</th>
+              <th style="padding:0.5rem 0.5rem">Corr. (freq.)</th>
+              <th style="padding:0.5rem 0.5rem">Uplift (sess/wk)</th>
+              <th style="padding:0.5rem 0.5rem">Corr. (repeat)</th>
+              <th style="padding:0.5rem 0.5rem">Uplift (repeat pp)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bqFc.features
+              .map(
+                (f) => `
+              <tr style="border-bottom:1px solid #f4f4f5">
+                <td style="padding:0.5rem 0.5rem">${f.rankByFrequencyCorrelation ?? '—'}</td>
+                <td style="padding:0.5rem 0.5rem">
+                  <div style="font-weight:600">${f.label}${
+                    f.lowSupport ? ' <span style="color:var(--muted); font-weight:400">· low support</span>' : ''
+                  }</div>
+                  <div style="color:var(--muted); font-size:0.75rem">${f.key}</div>
+                </td>
+                <td style="padding:0.5rem 0.5rem">${(f.adoption.adoptionRate * 100).toFixed(1)}% (${f.adoption.withFeature}/${f.adoption.withFeature + f.adoption.withoutFeature})</td>
+                <td style="padding:0.5rem 0.5rem">${f.bookingFrequency.correlation.toFixed(3)}</td>
+                <td style="padding:0.5rem 0.5rem">${f.bookingFrequency.uplift.toFixed(3)}</td>
+                <td style="padding:0.5rem 0.5rem">${f.repeatSessionRate.correlation.toFixed(3)}</td>
+                <td style="padding:0.5rem 0.5rem">${(f.repeatSessionRate.uplift * 100).toFixed(1)}</td>
+              </tr>`,
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -777,6 +892,84 @@ export class AnalyticsController {
       },
       options: { ...chartOptions, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Clicks' } } } }
     });
+
+    // BQ-FC: Student feature correlation
+    const bqFcRanked = ${JSON.stringify(
+      bqFcRanked.map((f) => ({
+        key: f.key,
+        label: f.label,
+        corrFreq: f.bookingFrequency.correlation,
+        corrRepeat: f.repeatSessionRate.correlation,
+        trend: f.trend,
+      })),
+    )};
+
+    const corrColor = (v) => v >= 0 ? 'rgba(16,185,129,0.8)' : 'rgba(239,68,68,0.8)';
+    const corrBorder = (v) => v >= 0 ? '#10b981' : '#ef4444';
+
+    new Chart(document.getElementById('bqFcFreqChart'), {
+      type: 'bar',
+      data: {
+        labels: bqFcRanked.map(f => f.label),
+        datasets: [{
+          label: 'Correlation',
+          data: bqFcRanked.map(f => f.corrFreq),
+          backgroundColor: bqFcRanked.map(f => corrColor(f.corrFreq)),
+          borderColor: bqFcRanked.map(f => corrBorder(f.corrFreq)),
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        ...chartOptions,
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { min: -1, max: 1, title: { display: true, text: 'Point-biserial correlation' } } }
+      }
+    });
+
+    new Chart(document.getElementById('bqFcRepeatChart'), {
+      type: 'bar',
+      data: {
+        labels: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => f.label),
+        datasets: [{
+          label: 'Correlation',
+          data: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => f.corrRepeat),
+          backgroundColor: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => corrColor(f.corrRepeat)),
+          borderColor: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => corrBorder(f.corrRepeat)),
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        ...chartOptions,
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { min: -1, max: 1, title: { display: true, text: 'Point-biserial correlation' } } }
+      }
+    });
+
+    const topFeature = bqFcRanked[0];
+    if (topFeature && topFeature.trend && topFeature.trend.length > 0) {
+      new Chart(document.getElementById('bqFcTrendChart'), {
+        type: 'line',
+        data: {
+          labels: topFeature.trend.map(t => t.bucketStart.slice(0, 10)),
+          datasets: [{
+            label: topFeature.label + ' — uplift (sess/week)',
+            data: topFeature.trend.map(t => t.upliftFrequency),
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99,102,241,0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#6366f1',
+          }]
+        },
+        options: { ...chartOptions, scales: { y: { title: { display: true, text: 'Uplift (sessions/week)' } } } }
+      });
+    }
   </script>
 </body>
 </html>

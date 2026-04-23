@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
+import { AnalyticsFeatureCorrelationService } from './analytics-feature-correlation.service';
 import { FirebaseModule } from '../firebase/firebase.module';
 import { AvailabilityModule } from '../availability/availability.module';
 import { UserModule } from '../user/user.module';
@@ -18,6 +19,7 @@ import { AvailabilityOccupancyUpdateService } from '../availability/availability
   providers: [
     AnalyticsService,
     AnalyticsBookingService,
+    AnalyticsFeatureCorrelationService,
     OccupancyRepository,
     AnalyticsOccupancyUpdateService,
     TutoringSessionOccupancyUpdateService,
@@ -26,6 +28,7 @@ import { AvailabilityOccupancyUpdateService } from '../availability/availability
   exports: [
     AnalyticsService,
     AnalyticsBookingService,
+    AnalyticsFeatureCorrelationService,
     OccupancyRepository,
     AnalyticsOccupancyUpdateService,
     TutoringSessionOccupancyUpdateService,
