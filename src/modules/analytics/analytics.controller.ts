@@ -423,8 +423,41 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ10: GET /analytics/booking-source-stats
+   *
+   * Returns breakdown of sessions booked via carousel vs standard search.
+   */
+  @Get('booking-source-stats')
+  @ApiOperation({
+    summary: 'BQ10: Booking source breakdown — carousel vs standard search',
+    description: 'Returns total sessions, carousel bookings, other bookings, and carousel percentage.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Booking source statistics',
+    schema: {
+      example: {
+        success: true,
+        totalSessions: 200,
+        carouselBookings: 80,
+        otherBookings: 120,
+        carouselPercentage: 40,
+      },
+    },
+  })
+  async getBookingSourceStats() {
+    try {
+      const data = await this.analyticsService.getBookingSourceStats();
+      return { success: true, ...data };
+    } catch (error) {
+      this.logger.error('BQ10: Error fetching booking source stats:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ1: GET /analytics/dashboard
-   * 
+   *
    * Returns an HTML dashboard with minimalist design visualizing:
    * - System Stability: Crashes, User-Reported Bugs, and Latency Issues (7-day line chart)
    * 
@@ -439,10 +472,11 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bq2] = await Promise.all([
+    const [metrics, bq5, bq2, bq10] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
       this.analyticsService.getBQ2DashboardData(),
+      this.analyticsService.getBookingSourceStats(),
     ]);
 
     const html = `
@@ -652,6 +686,35 @@ export class AnalyticsController {
       </div>
     </div>
 
+    <!-- BQ10: Booking Source -->
+    <div class="section">
+      <h1 class="section-title">Booking Source — Carousel vs Search (BQ10)</h1>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${bq10.totalSessions}</div>
+          <div class="stat-label">Total Sessions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--booking)">${bq10.carouselBookings}</div>
+          <div class="stat-label">From Carousel</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--manual)">${bq10.otherBookings}</div>
+          <div class="stat-label">From Search / Other</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--impression)">${bq10.carouselPercentage}%</div>
+          <div class="stat-label">Carousel Share</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>Carousel vs Other Bookings</h2>
+        <canvas id="bookingSourceChart"></canvas>
+      </div>
+    </div>
+
     <!-- BQ2: Tutor Carousel Performance -->
     <div class="section">
       <h1 class="section-title">Tutor Carousel Performance (BQ2)</h1>
@@ -800,6 +863,26 @@ export class AnalyticsController {
         }
       }
     });
+    // BQ10: Booking source pie chart
+    new Chart(document.getElementById('bookingSourceChart'), {
+      type: 'bar',
+      data: {
+        labels: ['Carousel', 'Search / Other'],
+        datasets: [{
+          data: [${bq10.carouselBookings}, ${bq10.otherBookings}],
+          backgroundColor: ['rgba(16,185,129,0.8)', 'rgba(107,114,128,0.4)'],
+          borderColor: ['#10b981', '#6b7280'],
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        ...chartOptions,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Sessions' } } }
+      }
+    });
+
     // BQ2: Carousel funnel
     const bq2Dates = ${JSON.stringify(bq2.dates)};
     const bq2Impressions = ${JSON.stringify(bq2.impressions)};

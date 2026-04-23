@@ -991,6 +991,42 @@ export class AnalyticsService {
   }
 
   /**
+   * BQ10: Percentage of sessions booked from carousel vs standard search
+   */
+  async getBookingSourceStats(): Promise<{
+    totalSessions: number;
+    carouselBookings: number;
+    otherBookings: number;
+    carouselPercentage: number;
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('tutoring_sessions').get();
+
+    let totalSessions = 0;
+    let carouselBookings = 0;
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      totalSessions++;
+      if (data.bookingSource === 'carousel') {
+        carouselBookings++;
+      }
+    });
+
+    const otherBookings = totalSessions - carouselBookings;
+    const carouselPercentage =
+      totalSessions > 0
+        ? Math.round((carouselBookings / totalSessions) * 10000) / 100
+        : 0;
+
+    this.logger.log(
+      `BQ10: Total: ${totalSessions}, Carousel: ${carouselBookings}, Other: ${otherBookings}, %: ${carouselPercentage}`,
+    );
+
+    return { totalSessions, carouselBookings, otherBookings, carouselPercentage };
+  }
+
+  /**
    * BQ2: Save a carousel interaction event to Firestore (carouselEvents collection)
    */
   async saveCarouselEvent(
