@@ -1027,6 +1027,93 @@ export class AnalyticsService {
   }
 
   /**
+   * BQ2: Carousel interaction dashboard data (last 7 days).
+   */
+  async getBQ2DashboardData(): Promise<{
+    dates: string[];
+    impressions: number[];
+    clicks: number[];
+    bookings: number[];
+    topTutors: Array<{ tutorId: string; clicks: number }>;
+    countdownBuckets: Array<{ bucket: string; count: number }>;
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('carouselEvents').get();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dates: string[] = [];
+    const impressionsByDay = new Map<string, number>();
+    const clicksByDay = new Map<string, number>();
+    const bookingsByDay = new Map<string, number>();
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      dates.push(dateStr);
+      impressionsByDay.set(dateStr, 0);
+      clicksByDay.set(dateStr, 0);
+      bookingsByDay.set(dateStr, 0);
+    }
+
+    const tutorClicks = new Map<string, number>();
+    const countdown = new Map<string, number>([
+      ['0-15', 0],
+      ['16-30', 0],
+      ['31-60', 0],
+      ['61+', 0],
+    ]);
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const ts = this.safeToDate(data.timestamp);
+      if (!ts || ts < sevenDaysAgo) return;
+
+      const dateStr = ts.toISOString().split('T')[0];
+      const event = String(data.event ?? '');
+
+      if (event === 'results_shown') {
+        impressionsByDay.set(dateStr, (impressionsByDay.get(dateStr) || 0) + 1);
+      } else if (event === 'tutor_clicked') {
+        clicksByDay.set(dateStr, (clicksByDay.get(dateStr) || 0) + 1);
+        if (data.tutorId) {
+          const tutorId = String(data.tutorId);
+          tutorClicks.set(tutorId, (tutorClicks.get(tutorId) || 0) + 1);
+        }
+      } else if (event === 'booking_completed') {
+        bookingsByDay.set(dateStr, (bookingsByDay.get(dateStr) || 0) + 1);
+      }
+
+      if (typeof data.countdownMinutes === 'number') {
+        const m = data.countdownMinutes;
+        const bucket = m <= 15 ? '0-15' : m <= 30 ? '16-30' : m <= 60 ? '31-60' : '61+';
+        countdown.set(bucket, (countdown.get(bucket) || 0) + 1);
+      }
+    });
+
+    const topTutors = [...tutorClicks.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tutorId, clicks]) => ({ tutorId, clicks }));
+
+    const countdownBuckets = [...countdown.entries()].map(([bucket, count]) => ({
+      bucket,
+      count,
+    }));
+
+    return {
+      dates,
+      impressions: dates.map((d) => impressionsByDay.get(d) || 0),
+      clicks: dates.map((d) => clicksByDay.get(d) || 0),
+      bookings: dates.map((d) => bookingsByDay.get(d) || 0),
+      topTutors,
+      countdownBuckets,
+    };
+  }
+
+  /**
    * BQ2: Save a carousel interaction event to Firestore (carouselEvents collection)
    */
   async saveCarouselEvent(
