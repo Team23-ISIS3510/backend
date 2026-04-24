@@ -474,11 +474,12 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bq2, bq10] = await Promise.all([
+    const [metrics, bq5, bq2, bq10, bqFc] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
       this.analyticsService.getBQ2DashboardData(),
       this.analyticsService.getBookingSourceStats(),
+      this.featureCorrelationService.getStudentFeatureCorrelation(),
     ]);
 
     // Rank by abs(correlation) vs booking frequency for the chart; keep all for the table.
