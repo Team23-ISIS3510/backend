@@ -145,6 +145,41 @@ export class AvailabilityRepository {
     }
   }
 
+  async deleteByTutorId(tutorId: string): Promise<number> {
+    try {
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db
+        .collection(this.COLLECTION)
+        .where('tutorId', '==', tutorId)
+        .get();
+
+      if (snapshot.empty) {
+        return 0;
+      }
+
+      const docs = snapshot.docs;
+      const BATCH_SIZE = 450;
+      let deletedCount = 0;
+
+      for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+        const batch = db.batch();
+        const chunk = docs.slice(i, i + BATCH_SIZE);
+
+        chunk.forEach((doc) => {
+          batch.delete(doc.ref);
+          deletedCount += 1;
+        });
+
+        await batch.commit();
+      }
+
+      return deletedCount;
+    } catch (error) {
+      this.logger.error(`Error deleting availabilities for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
+
   async exists(googleEventId: string): Promise<boolean> {
     try {
       const docRef = this.firebaseService.getFirestore().collection(this.COLLECTION).doc(googleEventId);

@@ -178,8 +178,34 @@ export class AuthService {
     }
   }
 
-  async googleSignIn(idToken: string): Promise<{ user: UserResponseDto; isNew: boolean }> {
-    return this.resolveUserFromIdToken(idToken);
+  async googleSignIn(idToken: string): Promise<AuthResponseDto> {
+    // Verify the token and get user data
+    const decoded = await this.verifyToken(idToken);
+    const existingUser = await this.userService.findByIdOrNull(decoded.uid);
+    
+    if (!existingUser) {
+      // Auto-register if user doesn't exist
+      const email = decoded.email;
+      if (!email) {
+        throw new UnauthorizedException('Authenticated token does not include an email');
+      }
+
+      await this.userService.create(decoded.uid, {
+        email,
+        name: decoded.name ?? email,
+        phone: '',
+        isTutor: false,
+      });
+    }
+
+    // Generate tokens for the frontend
+    const customToken = await this.firebase.getAuth().createCustomToken(decoded.uid);
+    
+    return {
+      idToken: customToken,
+      refreshToken: idToken,
+      expiresIn: '3600',
+    };
   }
 
   private async resolveUserFromIdToken(

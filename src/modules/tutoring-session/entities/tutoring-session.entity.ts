@@ -38,6 +38,9 @@ export interface TutoringSession {
     declinedAt?: Date;
     rejectionReason?: string;
   
+    // BQ10: booking origin tracking
+    bookingSource?: string;
+
     // Cancellation fields
     cancelledBy?: string;
     cancelledAt?: Date;

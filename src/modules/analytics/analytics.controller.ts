@@ -319,8 +319,52 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ5: GET /analytics/booking-success
+   *
+   * Returns instant booking success rate and total bookings.
+   * Instant booking = tutorApprovalStatus === 'approved' AND status === 'scheduled'
+   */
+  @Get('booking-success')
+  @ApiOperation({
+    summary: 'BQ5: Booking success rate and total bookings',
+    description:
+      'Returns total bookings, instant confirmations, success rate percentage, ' +
+      'and a 7-day daily breakdown for instant vs manual bookings.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Booking success metrics',
+    schema: {
+      example: {
+        success: true,
+        totalBookings: 120,
+        instantConfirmations: 95,
+        successRate: 79.17,
+        dates: ['2026-04-13', '2026-04-14'],
+        instantByDay: [10, 8],
+        failedByDay: [3, 2],
+      },
+    },
+  })
+  async getBookingSuccess() {
+    try {
+      const data = await this.analyticsService.getBookingSuccessData();
+      return {
+        success: true,
+        ...data.summary,
+        dates: data.dates,
+        instantByDay: data.instantByDay,
+        failedByDay: data.failedByDay,
+      };
+    } catch (error) {
+      this.logger.error('BQ5: Error fetching booking success data:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ1: POST /analytics/bug
-   * 
+   *
    * Receives bug reports from the Kotlin mobile app
    * Stores crash reports, bugs, and other telemetry data
    */
@@ -381,39 +425,36 @@ export class AnalyticsController {
   }
 
   /**
-   * BQ-FC: GET /analytics/feature-correlation
+   * BQ10: GET /analytics/booking-source-stats
    *
-   * Answers: "Which student-side features correlate most strongly with higher booking
-   * frequency and repeat session rates over time?"
-   *
-   * Pipeline: extract → feature-engineer → compute outcomes → score correlation+uplift
-   * → rank → shape for dashboard. See AnalyticsFeatureCorrelationService for details.
+   * Returns breakdown of sessions booked via carousel vs standard search.
    */
-  @Get('feature-correlation')
+  @Get('booking-source-stats')
   @ApiOperation({
-    summary: 'BQ: Student-side features vs booking frequency & repeat-session rate',
-    description:
-      'For each student-side feature (carousel booking, returning-tutor, instant booking, high-rated-tutor, ' +
-      'multi-course, short-notice), reports point-biserial correlation and uplift against two outcomes: ' +
-      'sessions/week per student, and repeat-session rate. Includes 4-bucket trend for stability over time.',
+    summary: 'BQ10: Booking source breakdown — carousel vs standard search',
+    description: 'Returns total sessions, carousel bookings, other bookings, and carousel percentage.',
   })
-  @ApiQuery({
-    name: 'windowDays',
-    required: false,
-    type: Number,
-    description: 'Analysis window size in days (default 365, min 30, max 1095).',
+  @ApiResponse({
+    status: 200,
+    description: 'Booking source statistics',
+    schema: {
+      example: {
+        success: true,
+        totalSessions: 200,
+        carouselBookings: 80,
+        otherBookings: 120,
+        carouselPercentage: 40,
+      },
+    },
   })
-  @ApiResponse({ status: 200, description: 'Feature correlation report' })
-  async getFeatureCorrelation(@Query('windowDays') windowDays?: string) {
-    let parsed = windowDays !== undefined ? parseInt(windowDays, 10) : 365;
-    if (!Number.isFinite(parsed)) {
-      throw new BadRequestException('windowDays must be an integer');
+  async getBookingSourceStats() {
+    try {
+      const data = await this.analyticsService.getBookingSourceStats();
+      return { success: true, ...data };
+    } catch (error) {
+      this.logger.error('BQ10: Error fetching booking source stats:', error);
+      throw error;
     }
-    // Clamp to a sane range so a caller can't accidentally scan the full collection forever.
-    parsed = Math.max(30, Math.min(1095, parsed));
-
-    const report = await this.featureCorrelationService.getStudentFeatureCorrelation(parsed);
-    return { success: true, ...report };
   }
 
   /**
@@ -433,10 +474,11 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bqFc] = await Promise.all([
+    const [metrics, bq5, bq2, bq10] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
-      this.featureCorrelationService.getStudentFeatureCorrelation(365),
+      this.analyticsService.getBQ2DashboardData(),
+      this.analyticsService.getBookingSourceStats(),
     ]);
 
     // Rank by abs(correlation) vs booking frequency for the chart; keep all for the table.
@@ -612,14 +654,31 @@ export class AnalyticsController {
       <canvas id="stabilityChart"></canvas>
     </div>
 
+    <!-- BQ3: Booking Cancellation Rate -->
+    <div class="section">
+      <h1 class="section-title">Booking Reliability</h1>
+      
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${metrics.summary.cancellationRate}%</div>
+          <div class="stat-label">Cancellation Rate</div>
+          <div style="font-size: 0.85rem; margin-top: 0.5rem; opacity: 0.8;">Cancelled <12h before start</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${metrics.summary.totalCancellations}</div>
+          <div class="stat-label">Late Cancellations</div>
+        </div>
+      </div>
+    </div>
+
     <!-- BQ5: Instant Booking Success Rate -->
     <div class="section">
       <h1 class="section-title">Instant Booking Success Rate</h1>
 
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-value">${bq5.summary.totalBookings}</div>
-          <div class="stat-label">Total Bookings</div>
+          <div class="stat-value">${bq5.summary.totalInstantAttempts}</div>
+          <div class="stat-label">Total Instant Attempts</div>
         </div>
         <div class="stat-card instant">
           <div class="stat-value">${bq5.summary.instantConfirmations}</div>
@@ -637,6 +696,38 @@ export class AnalyticsController {
       </div>
     </div>
 
+    <!-- BQ10: Booking Source -->
+    <div class="section">
+      <h1 class="section-title">Booking Source — Carousel vs Search (BQ10)</h1>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${bq10.totalSessions}</div>
+          <div class="stat-label">Total Sessions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--booking)">${bq10.carouselBookings}</div>
+          <div class="stat-label">From Carousel</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--manual)">${bq10.otherBookings}</div>
+          <div class="stat-label">From Search / Other</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--impression)">${bq10.carouselPercentage}%</div>
+          <div class="stat-label">Carousel Share</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>Carousel vs Other Bookings</h2>
+        <canvas id="bookingSourceChart"></canvas>
+      </div>
+    </div>
+
+    <!-- BQ2: Tutor Carousel Performance -->
+    <div class="section">
+      <h1 class="section-title">Tutor Carousel Performance (BQ2)</h1>
 
     <!-- BQ-FC: Student Feature Correlation with Booking Outcomes -->
     <div class="section">
@@ -720,7 +811,7 @@ export class AnalyticsController {
     const dates = ${JSON.stringify(metrics.dates)};
     const bq5Dates = ${JSON.stringify(bq5.dates)};
     const instantByDay = ${JSON.stringify(bq5.instantByDay)};
-    const manualByDay = ${JSON.stringify(bq5.manualByDay)};
+    const failedByDay = ${JSON.stringify(bq5.failedByDay)};
     const crashes = ${JSON.stringify(metrics.crashes)};
     const bugs = ${JSON.stringify(metrics.bugs)};
     const latencyIssues = ${JSON.stringify(metrics.latencyIssues)};
@@ -792,8 +883,8 @@ export class AnalyticsController {
             borderRadius: 4,
           },
           {
-            label: 'Manual / Other',
-            data: manualByDay,
+            label: 'Failed / Other',
+            data: failedByDay,
             backgroundColor: 'rgba(107, 114, 128, 0.4)',
             borderColor: '#6b7280',
             borderWidth: 1,
@@ -813,6 +904,46 @@ export class AnalyticsController {
           }
         }
       }
+    });
+    // BQ10: Booking source pie chart
+    new Chart(document.getElementById('bookingSourceChart'), {
+      type: 'bar',
+      data: {
+        labels: ['Carousel', 'Search / Other'],
+        datasets: [{
+          data: [${bq10.carouselBookings}, ${bq10.otherBookings}],
+          backgroundColor: ['rgba(16,185,129,0.8)', 'rgba(107,114,128,0.4)'],
+          borderColor: ['#10b981', '#6b7280'],
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        ...chartOptions,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Sessions' } } }
+      }
+    });
+
+    // BQ2: Carousel funnel
+    const bq2Dates = ${JSON.stringify(bq2.dates)};
+    const bq2Impressions = ${JSON.stringify(bq2.impressions)};
+    const bq2Clicks = ${JSON.stringify(bq2.clicks)};
+    const bq2Bookings = ${JSON.stringify(bq2.bookings)};
+    const topTutors = ${JSON.stringify(bq2.topTutors)};
+    const countdownBuckets = ${JSON.stringify(bq2.countdownBuckets)};
+
+    new Chart(document.getElementById('carouselFunnelChart'), {
+      type: 'line',
+      data: {
+        labels: bq2Dates,
+        datasets: [
+          { label: 'Impressions', data: bq2Impressions, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointBackgroundColor: '#3b82f6' },
+          { label: 'Clicks', data: bq2Clicks, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointBackgroundColor: '#f59e0b' },
+          { label: 'Bookings', data: bq2Bookings, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointBackgroundColor: '#10b981' }
+        ]
+      },
+      options: { ...chartOptions, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Events' } } } }
     });
 
 

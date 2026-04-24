@@ -9,4 +9,5 @@ export interface User {
   description?: string;
   createdAt: Date;
   updatedAt: Date;
+  profilePictureUrl?: string;
 }

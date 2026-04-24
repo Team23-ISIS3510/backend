@@ -17,4 +17,5 @@ export interface TutoringSession {
   tutorEmail: string;
   tutorId: string;
   updatedAt: any;
+  description?: string;
 }
