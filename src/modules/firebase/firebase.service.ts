@@ -51,15 +51,14 @@ export class FirebaseService implements OnModuleInit {
           );
         }
 
-        if (useFirestoreEmulator) {
-          this.app = admin.initializeApp({ projectId });
-          this.logger.log(
-            `Firebase Admin SDK initialized using Firestore emulator (${emulatorHost})`,
-          );
-          return;
-        }
-
         if (!clientEmail || !privateKeyRaw) {
+          if (useFirestoreEmulator) {
+            this.app = admin.initializeApp({ projectId });
+            this.logger.warn(
+              `Firebase initialized with Firestore emulator (${emulatorHost}) without service-account credentials. Auth/Storage admin operations may fail unless emulator hosts are configured.`,
+            );
+            return;
+          }
           throw new Error(
             'Missing required Firebase credentials for production mode: FIREBASE_CLIENT_EMAIL or FIREBASE_PRIVATE_KEY'
           );
@@ -88,7 +87,13 @@ export class FirebaseService implements OnModuleInit {
           }),
         });
 
-        this.logger.log('Firebase Admin SDK initialized successfully');
+        if (useFirestoreEmulator) {
+          this.logger.log(
+            `Firebase Admin SDK initialized with service account + Firestore emulator (${emulatorHost})`,
+          );
+        } else {
+          this.logger.log('Firebase Admin SDK initialized successfully');
+        }
 
       } else {
 
