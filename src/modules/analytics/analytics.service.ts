@@ -1187,6 +1187,174 @@ export class AnalyticsService {
   }
 
   /**
+   * BQ2: Get carousel dashboard data aggregated for the last 7 days
+   * Returns funnel metrics (impressions, clicks, bookings), top tutors, and countdown buckets
+   */
+  async getBQ2DashboardData(): Promise<{
+    dates: string[];
+    impressions: number[];
+    clicks: number[];
+    bookings: number[];
+    topTutors: { tutorId: string; clicks: number }[];
+    countdownBuckets: { label: string; count: number }[];
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('carouselEvents').get();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dates: string[] = [];
+    const impressionsByDay = new Map<string, number>();
+    const clicksByDay = new Map<string, number>();
+    const bookingsByDay = new Map<string, number>();
+    const tutorClickCounts = new Map<string, number>();
+    const buckets = { '0-5': 0, '5-15': 0, '15-30': 0, '30+': 0 };
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      dates.push(dateStr);
+      impressionsByDay.set(dateStr, 0);
+      clicksByDay.set(dateStr, 0);
+      bookingsByDay.set(dateStr, 0);
+    }
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const ts = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+      if (ts < sevenDaysAgo) return;
+
+      const dateStr = ts.toISOString().split('T')[0];
+
+      switch (data.event) {
+        case 'results_shown':
+          impressionsByDay.set(dateStr, (impressionsByDay.get(dateStr) || 0) + 1);
+          break;
+        case 'tutor_clicked':
+          clicksByDay.set(dateStr, (clicksByDay.get(dateStr) || 0) + 1);
+          if (data.tutorId) {
+            tutorClickCounts.set(data.tutorId, (tutorClickCounts.get(data.tutorId) || 0) + 1);
+          }
+          if (typeof data.countdownMinutes === 'number') {
+            if (data.countdownMinutes <= 5) buckets['0-5']++;
+            else if (data.countdownMinutes <= 15) buckets['5-15']++;
+            else if (data.countdownMinutes <= 30) buckets['15-30']++;
+            else buckets['30+']++;
+          }
+          break;
+        case 'booking_completed':
+          bookingsByDay.set(dateStr, (bookingsByDay.get(dateStr) || 0) + 1);
+          break;
+      }
+    });
+
+    const topTutors = [...tutorClickCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tutorId, clicks]) => ({ tutorId, clicks }));
+
+    this.logger.log('BQ2: Dashboard data computed');
+
+    return {
+      dates,
+      impressions: dates.map((d) => impressionsByDay.get(d) || 0),
+      clicks: dates.map((d) => clicksByDay.get(d) || 0),
+      bookings: dates.map((d) => bookingsByDay.get(d) || 0),
+      topTutors,
+      countdownBuckets: [
+        { label: '0–5 min', count: buckets['0-5'] },
+        { label: '5–15 min', count: buckets['5-15'] },
+        { label: '15–30 min', count: buckets['15-30'] },
+        { label: '30+ min', count: buckets['30+'] },
+      ],
+    };
+  }
+
+  /**
+   * BQ15: Log homepage load time telemetry to Firestore (telemetry_bq15 collection)
+   * @param loadTimeMs Load time in milliseconds
+   * @param connectivityStatus Network connectivity status at load time
+   * @param userId Optional Firebase UID of the logged-in user
+   * @returns Firestore document ID
+   */
+  async logHomepageLoadTime(
+    loadTimeMs: number,
+    connectivityStatus: 'online' | 'offline',
+    userId?: string,
+  ): Promise<string> {
+    const db = this.firebaseService.getFirestore();
+
+    const docRef = await db.collection('telemetry_bq15').add({
+      event_type: 'homepage_load',
+      load_time_ms: loadTimeMs,
+      timestamp: new Date(),
+      user_id: userId ?? null,
+      connectivity_status: connectivityStatus,
+    });
+
+    this.logger.log(
+      `BQ15: Homepage load logged – ${loadTimeMs}ms, connectivity: ${connectivityStatus}, doc: ${docRef.id}`,
+    );
+
+    return docRef.id;
+  }
+
+  /**
+   * BQ15: Compute homepage load time performance metrics
+   * Answers: does avg load time exceed 2 s? In what % of sessions is the 2 s target missed?
+   */
+  async getHomepageLoadMetrics(): Promise<{
+    totalSessions: number;
+    avgLoadTimeMs: number;
+    failureCount: number;
+    failurePercentage: number;
+  }> {
+    try {
+      this.logger.log('BQ15: Computing homepage load time metrics');
+
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db
+        .collection('telemetry_bq15')
+        .where('event_type', '==', 'homepage_load')
+        .get();
+
+      if (snapshot.empty) {
+        this.logger.warn('BQ15: No homepage load telemetry found');
+        return { totalSessions: 0, avgLoadTimeMs: 0, failureCount: 0, failurePercentage: 0 };
+      }
+
+      let totalLoadTimeMs = 0;
+      let failureCount = 0;
+      const totalSessions = snapshot.size;
+
+      snapshot.forEach((doc) => {
+        const loadTimeMs: number =
+          typeof doc.data().load_time_ms === 'number' ? doc.data().load_time_ms : 0;
+        totalLoadTimeMs += loadTimeMs;
+        if (loadTimeMs > 2000) failureCount++;
+      });
+
+      const avgLoadTimeMs =
+        totalSessions > 0 ? Math.round(totalLoadTimeMs / totalSessions) : 0;
+      const failurePercentage =
+        totalSessions > 0
+          ? Math.round((failureCount / totalSessions) * 10000) / 100
+          : 0;
+
+      this.logger.log(
+        `BQ15: Sessions: ${totalSessions}, Avg: ${avgLoadTimeMs}ms, Failures (>2s): ${failureCount} (${failurePercentage}%)`,
+      );
+
+      return { totalSessions, avgLoadTimeMs, failureCount, failurePercentage };
+    } catch (error) {
+      this.logger.error('BQ15: Error computing homepage load metrics:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Calculate cancellation rate for confirmed bookings
    * Only counts cancellations that happened < 12 hours before scheduled start
    */

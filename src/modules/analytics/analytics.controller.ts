@@ -7,6 +7,7 @@ import { AnalyticsFeatureCorrelationService } from './analytics-feature-correlat
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { CreateBugReportDto } from './dto/bug-report.dto';
 import { CreateCarouselEventDto } from './dto/carousel-event.dto';
+import { LogHomepageLoadDto } from './dto/homepage-load.dto';
 import { UserService } from '../user/user.service';
 import { TutoringSessionService } from '../tutoring-session/tutoring-session.service';
 import { FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
@@ -458,6 +459,68 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ15: POST /analytics/homepage-load
+   * Receives homepage load time telemetry from the mobile app (non-blocking fire-and-forget).
+   */
+  @Post('homepage-load')
+  @ApiOperation({
+    summary: 'BQ15: Log homepage load time telemetry',
+    description:
+      'Receives and stores homepage load time measurements from the mobile app for performance monitoring. ' +
+      'Start time is when the homepage opens; end time is when all data (sessions, subjects) is rendered.',
+  })
+  @ApiResponse({ status: 201, description: 'Telemetry logged successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid request body' })
+  async logHomepageLoad(@Body() dto: LogHomepageLoadDto) {
+    this.logger.log(`BQ15: Received homepage load event – ${dto.load_time_ms}ms, connectivity: ${dto.connectivity_status}`);
+
+    const docId = await this.analyticsService.logHomepageLoadTime(
+      dto.load_time_ms,
+      dto.connectivity_status,
+      dto.user_id,
+    );
+
+    return {
+      success: true,
+      docId,
+      message: 'Homepage load time logged successfully',
+    };
+  }
+
+  /**
+   * BQ15: GET /analytics/homepage-load-metrics
+   * Returns computed homepage performance metrics.
+   */
+  @Get('homepage-load-metrics')
+  @ApiOperation({
+    summary: 'BQ15: Homepage load time performance metrics',
+    description:
+      'Returns average homepage load time and the percentage of sessions exceeding the 2-second threshold.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Homepage load time metrics',
+    schema: {
+      example: {
+        success: true,
+        totalSessions: 150,
+        avgLoadTimeMs: 1450,
+        failureCount: 30,
+        failurePercentage: 20,
+      },
+    },
+  })
+  async getHomepageLoadMetrics() {
+    try {
+      const data = await this.analyticsService.getHomepageLoadMetrics();
+      return { success: true, ...data };
+    } catch (error) {
+      this.logger.error('BQ15: Error fetching homepage load metrics:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ1: GET /analytics/dashboard
    *
    * Returns an HTML dashboard with minimalist design visualizing:
@@ -474,11 +537,13 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bq2, bq10] = await Promise.all([
+    const [metrics, bq5, bq2, bq10, bqFc, bq15] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
       this.analyticsService.getBQ2DashboardData(),
       this.analyticsService.getBookingSourceStats(),
+      this.featureCorrelationService.getStudentFeatureCorrelation(),
+      this.analyticsService.getHomepageLoadMetrics(),
     ]);
 
     // Rank by abs(correlation) vs booking frequency for the chart; keep all for the table.
@@ -796,6 +861,47 @@ export class AnalyticsController {
         </table>
       </div>
     </div>
+
+    <!-- BQ15: Homepage Load Time Performance -->
+    <div class="section">
+      <h1 class="section-title">Homepage Load Time Performance (BQ15)</h1>
+      <p style="color:var(--muted); margin-top:-0.75rem; margin-bottom:1.25rem; max-width:70ch">
+        Does the average homepage load time exceed the <strong>2-second</strong> threshold?
+        Based on <strong>${bq15.totalSessions}</strong> measured sessions.
+      </p>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${bq15.totalSessions}</div>
+          <div class="stat-label">Sessions Measured</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:${bq15.avgLoadTimeMs > 2000 ? 'var(--crash)' : 'var(--instant)'}">
+            ${bq15.avgLoadTimeMs} ms
+          </div>
+          <div class="stat-label">Avg Load Time</div>
+          <div style="font-size:0.8rem;margin-top:0.4rem;opacity:0.75">
+            ${bq15.avgLoadTimeMs <= 2000 ? 'Within 2 s threshold' : 'Exceeds 2 s threshold'}
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:${bq15.failurePercentage > 20 ? 'var(--crash)' : bq15.failurePercentage > 10 ? 'var(--bug)' : 'var(--instant)'}">
+            ${bq15.failurePercentage}%
+          </div>
+          <div class="stat-label">Sessions &gt; 2 s</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--crash)">${bq15.failureCount}</div>
+          <div class="stat-label">Slow Load Events</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>Load Time — Within vs Exceeds 2 s Threshold</h2>
+        <canvas id="bq15Chart"></canvas>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -1025,6 +1131,30 @@ export class AnalyticsController {
         options: { ...chartOptions, scales: { y: { title: { display: true, text: 'Uplift (sessions/week)' } } } }
       });
     }
+
+    // BQ15: Homepage load time doughnut chart
+    const bq15PassPct = ${100 - bq15.failurePercentage};
+    const bq15FailPct = ${bq15.failurePercentage};
+    new Chart(document.getElementById('bq15Chart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Within 2 s (' + bq15PassPct.toFixed(1) + '%)', 'Exceeds 2 s (' + bq15FailPct.toFixed(1) + '%)'],
+        datasets: [{
+          data: [bq15PassPct, bq15FailPct],
+          backgroundColor: ['rgba(16,185,129,0.8)', 'rgba(239,68,68,0.8)'],
+          borderColor: ['#10b981', '#ef4444'],
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { position: 'bottom', labels: { usePointStyle: true, padding: 15 } },
+          tooltip: { callbacks: { label: (ctx) => ctx.label } }
+        }
+      }
+    });
   </script>
 </body>
 </html>
