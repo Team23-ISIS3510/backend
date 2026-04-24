@@ -14,39 +14,39 @@ import { FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
 
 class AvailableTutorsResponseDto {
   @ApiProperty({ example: true })
-  success: boolean;
+  success!: boolean;
 
   @ApiProperty({ example: 'ISIS3710' })
-  course: string;
+  course!: string;
 
   @ApiProperty({ example: 4.5 })
-  minRating: number;
+  minRating!: number;
 
   @ApiProperty({ example: 4 })
-  withinHours: number;
+  withinHours!: number;
 
   @ApiProperty({ example: { from: '2026-03-19T15:00:00.000Z', to: '2026-03-19T19:00:00.000Z' } })
-  queryWindow: { from: Date; to: Date };
+  queryWindow!: { from: Date; to: Date };
 
   @ApiProperty({ example: 3 })
-  count: number;
+  count!: number;
 
   @ApiProperty({ isArray: true })
-  tutors: AvailableTutorResult[];
+  tutors!: AvailableTutorResult[];
 }
 
 class ReturningTutorResponseDto {
   @ApiProperty({ example: true })
-  success: boolean;
+  success!: boolean;
 
   @ApiProperty({ example: 'user-uid-123' })
-  student: string;
+  student!: string;
 
   @ApiProperty({ example: 'ISIS3710' })
-  course: string;
+  course!: string;
 
   @ApiProperty({ nullable: true, description: 'Most-booked tutor with an upcoming slot, or null if none found' })
-  tutor: ReturningTutorResult | null;
+  tutor!: ReturningTutorResult | null;
 }
 
 @ApiTags('Analytics')
