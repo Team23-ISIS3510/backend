@@ -12,7 +12,7 @@ export interface AvailableTutorResult {
   rating: number;
   hourlyRate: number | null;
   bio: string;
-  profileImage: string | null;
+  profilePictureUrl: string | null;
   location: string;
   courses: string[];
   nextAvailableSlot: {
@@ -253,7 +253,7 @@ export class AnalyticsService {
                 ? raw.hourly_rate
                 : null,
             bio: raw.bio ?? '',
-            profileImage: raw.profileImage ?? null,
+            profilePictureUrl: raw.profilePictureUrl ?? null,
             location: raw.location ?? 'Virtual',
             courses: Array.isArray(raw.courses) ? raw.courses : [],
             nextAvailableSlot: {
@@ -895,7 +895,7 @@ export class AnalyticsService {
           rating: typeof raw.rating === 'number' ? raw.rating : 0,
           hourlyRate: typeof raw.hourlyRate === 'number' ? raw.hourlyRate : null,
           bio: raw.bio ?? '',
-          profileImage: raw.profileImage ?? null,
+          profilePictureUrl: raw.profilePictureUrl ?? null,
           location: raw.location ?? 'Virtual',
           courses: Array.isArray(raw.courses) ? raw.courses : [],
           nextAvailableSlot: {
