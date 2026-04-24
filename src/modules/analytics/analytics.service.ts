@@ -1027,6 +1027,93 @@ export class AnalyticsService {
   }
 
   /**
+   * BQ2: Carousel interaction dashboard data (last 7 days).
+   */
+  async getBQ2DashboardData(): Promise<{
+    dates: string[];
+    impressions: number[];
+    clicks: number[];
+    bookings: number[];
+    topTutors: Array<{ tutorId: string; clicks: number }>;
+    countdownBuckets: Array<{ bucket: string; count: number }>;
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('carouselEvents').get();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dates: string[] = [];
+    const impressionsByDay = new Map<string, number>();
+    const clicksByDay = new Map<string, number>();
+    const bookingsByDay = new Map<string, number>();
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      dates.push(dateStr);
+      impressionsByDay.set(dateStr, 0);
+      clicksByDay.set(dateStr, 0);
+      bookingsByDay.set(dateStr, 0);
+    }
+
+    const tutorClicks = new Map<string, number>();
+    const countdown = new Map<string, number>([
+      ['0-15', 0],
+      ['16-30', 0],
+      ['31-60', 0],
+      ['61+', 0],
+    ]);
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const ts = this.safeToDate(data.timestamp);
+      if (!ts || ts < sevenDaysAgo) return;
+
+      const dateStr = ts.toISOString().split('T')[0];
+      const event = String(data.event ?? '');
+
+      if (event === 'results_shown') {
+        impressionsByDay.set(dateStr, (impressionsByDay.get(dateStr) || 0) + 1);
+      } else if (event === 'tutor_clicked') {
+        clicksByDay.set(dateStr, (clicksByDay.get(dateStr) || 0) + 1);
+        if (data.tutorId) {
+          const tutorId = String(data.tutorId);
+          tutorClicks.set(tutorId, (tutorClicks.get(tutorId) || 0) + 1);
+        }
+      } else if (event === 'booking_completed') {
+        bookingsByDay.set(dateStr, (bookingsByDay.get(dateStr) || 0) + 1);
+      }
+
+      if (typeof data.countdownMinutes === 'number') {
+        const m = data.countdownMinutes;
+        const bucket = m <= 15 ? '0-15' : m <= 30 ? '16-30' : m <= 60 ? '31-60' : '61+';
+        countdown.set(bucket, (countdown.get(bucket) || 0) + 1);
+      }
+    });
+
+    const topTutors = [...tutorClicks.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tutorId, clicks]) => ({ tutorId, clicks }));
+
+    const countdownBuckets = [...countdown.entries()].map(([bucket, count]) => ({
+      bucket,
+      count,
+    }));
+
+    return {
+      dates,
+      impressions: dates.map((d) => impressionsByDay.get(d) || 0),
+      clicks: dates.map((d) => clicksByDay.get(d) || 0),
+      bookings: dates.map((d) => bookingsByDay.get(d) || 0),
+      topTutors,
+      countdownBuckets,
+    };
+  }
+
+  /**
    * BQ2: Save a carousel interaction event to Firestore (carouselEvents collection)
    */
   async saveCarouselEvent(
@@ -1053,102 +1140,6 @@ export class AnalyticsService {
     this.logger.log(`BQ2: Carousel event saved – ${event}, course: ${courseId}`);
   }
 
-  /**
-   * BQ2: Compute carousel funnel metrics for the last 7 days.
-   * Returns impressions, clicks, bookings per day plus aggregate rates.
-   */
-  async getBQ2DashboardData(): Promise<{
-    summary: { ctr: number; conversionRate: number; emptyResultRate: number; totalBookings: number };
-    dates: string[];
-    impressions: number[];
-    clicks: number[];
-    bookings: number[];
-    topTutors: { tutorId: string; clicks: number }[];
-    countdownBuckets: { label: string; count: number }[];
-  }> {
-    const db = this.firebaseService.getFirestore();
-    const snapshot = await db.collection('carouselEvents').get();
-
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    const dates: string[] = [];
-    const impressionsByDay = new Map<string, number>();
-    const clicksByDay = new Map<string, number>();
-    const bookingsByDay = new Map<string, number>();
-
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().split('T')[0];
-      dates.push(key);
-      impressionsByDay.set(key, 0);
-      clicksByDay.set(key, 0);
-      bookingsByDay.set(key, 0);
-    }
-
-    let totalImpressions = 0;
-    let totalClicks = 0;
-    let totalBookings = 0;
-    let emptyResults = 0;
-    const tutorClickMap = new Map<string, number>();
-    const buckets = { '<30min': 0, '30-60min': 0, '1-2h': 0, '2-4h': 0 };
-
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      const ts: Date = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
-      if (ts < sevenDaysAgo) return;
-
-      const dateKey = ts.toISOString().split('T')[0];
-
-      switch (data.event) {
-        case 'results_shown':
-          totalImpressions++;
-          impressionsByDay.set(dateKey, (impressionsByDay.get(dateKey) ?? 0) + 1);
-          if ((data.resultCount ?? 1) === 0) emptyResults++;
-          break;
-        case 'tutor_clicked':
-          totalClicks++;
-          clicksByDay.set(dateKey, (clicksByDay.get(dateKey) ?? 0) + 1);
-          if (data.tutorId) tutorClickMap.set(data.tutorId, (tutorClickMap.get(data.tutorId) ?? 0) + 1);
-          if (typeof data.countdownMinutes === 'number') {
-            const m = data.countdownMinutes;
-            if (m < 30) buckets['<30min']++;
-            else if (m < 60) buckets['30-60min']++;
-            else if (m < 120) buckets['1-2h']++;
-            else buckets['2-4h']++;
-          }
-          break;
-        case 'booking_completed':
-          totalBookings++;
-          bookingsByDay.set(dateKey, (bookingsByDay.get(dateKey) ?? 0) + 1);
-          break;
-      }
-    });
-
-    const ctr = totalImpressions > 0 ? Math.round((totalClicks / totalImpressions) * 100) : 0;
-    const conversionRate = totalClicks > 0 ? Math.round((totalBookings / totalClicks) * 100) : 0;
-    const emptyResultRate = totalImpressions > 0 ? Math.round((emptyResults / totalImpressions) * 100) : 0;
-
-    const topTutors = [...tutorClickMap.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([tutorId, clicks]) => ({ tutorId, clicks }));
-
-    const countdownBuckets = Object.entries(buckets).map(([label, count]) => ({ label, count }));
-
-    this.logger.log(`BQ2: Dashboard – impressions:${totalImpressions}, clicks:${totalClicks}, bookings:${totalBookings}`);
-
-    return {
-      summary: { ctr, conversionRate, emptyResultRate, totalBookings },
-      dates,
-      impressions: dates.map((d) => impressionsByDay.get(d) ?? 0),
-      clicks: dates.map((d) => clicksByDay.get(d) ?? 0),
-      bookings: dates.map((d) => bookingsByDay.get(d) ?? 0),
-      topTutors,
-      countdownBuckets,
-    };
-  }
 
   /**
    * BQ1: Save a bug report to Firestore
