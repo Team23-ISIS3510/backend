@@ -617,11 +617,14 @@ export class TutorService {
       });
 
       // Update application status
-      await appDoc.ref.update({
+      const updateData: Record<string, any> = {
         status: 'approved',
         reviewedAt: new Date(),
-        reviewedBy,
-      });
+      };
+      if (reviewedBy !== undefined) {
+        updateData.reviewedBy = reviewedBy;
+      }
+      await appDoc.ref.update(updateData);
 
       this.logger.log(
         `Application ${applicationId} approved. Course ${courseId} added to tutor ${tutorId}`,
@@ -666,12 +669,15 @@ export class TutorService {
       const appData = appDoc.data();
 
       // Update application status
-      await appDoc.ref.update({
+      const updateData: Record<string, any> = {
         status: 'rejected',
         rejectionReason,
         reviewedAt: new Date(),
-        reviewedBy,
-      });
+      };
+      if (reviewedBy !== undefined) {
+        updateData.reviewedBy = reviewedBy;
+      }
+      await appDoc.ref.update(updateData);
 
       this.logger.log(`Application ${applicationId} rejected`);
 
