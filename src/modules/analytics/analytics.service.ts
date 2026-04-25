@@ -1274,6 +1274,88 @@ export class AnalyticsService {
   }
 
   /**
+   * BQ15: Log homepage load time telemetry to Firestore (telemetry_bq15 collection)
+   * @param loadTimeMs Load time in milliseconds
+   * @param connectivityStatus Network connectivity status at load time
+   * @param userId Optional Firebase UID of the logged-in user
+   * @returns Firestore document ID
+   */
+  async logHomepageLoadTime(
+    loadTimeMs: number,
+    connectivityStatus: 'online' | 'offline',
+    userId?: string,
+  ): Promise<string> {
+    const db = this.firebaseService.getFirestore();
+
+    const docRef = await db.collection('telemetry_bq15').add({
+      event_type: 'homepage_load',
+      load_time_ms: loadTimeMs,
+      timestamp: new Date(),
+      user_id: userId ?? null,
+      connectivity_status: connectivityStatus,
+    });
+
+    this.logger.log(
+      `BQ15: Homepage load logged – ${loadTimeMs}ms, connectivity: ${connectivityStatus}, doc: ${docRef.id}`,
+    );
+
+    return docRef.id;
+  }
+
+  /**
+   * BQ15: Compute homepage load time performance metrics
+   * Answers: does avg load time exceed 2 s? In what % of sessions is the 2 s target missed?
+   */
+  async getHomepageLoadMetrics(): Promise<{
+    totalSessions: number;
+    avgLoadTimeMs: number;
+    failureCount: number;
+    failurePercentage: number;
+  }> {
+    try {
+      this.logger.log('BQ15: Computing homepage load time metrics');
+
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db
+        .collection('telemetry_bq15')
+        .where('event_type', '==', 'homepage_load')
+        .get();
+
+      if (snapshot.empty) {
+        this.logger.warn('BQ15: No homepage load telemetry found');
+        return { totalSessions: 0, avgLoadTimeMs: 0, failureCount: 0, failurePercentage: 0 };
+      }
+
+      let totalLoadTimeMs = 0;
+      let failureCount = 0;
+      const totalSessions = snapshot.size;
+
+      snapshot.forEach((doc) => {
+        const loadTimeMs: number =
+          typeof doc.data().load_time_ms === 'number' ? doc.data().load_time_ms : 0;
+        totalLoadTimeMs += loadTimeMs;
+        if (loadTimeMs > 2000) failureCount++;
+      });
+
+      const avgLoadTimeMs =
+        totalSessions > 0 ? Math.round(totalLoadTimeMs / totalSessions) : 0;
+      const failurePercentage =
+        totalSessions > 0
+          ? Math.round((failureCount / totalSessions) * 10000) / 100
+          : 0;
+
+      this.logger.log(
+        `BQ15: Sessions: ${totalSessions}, Avg: ${avgLoadTimeMs}ms, Failures (>2s): ${failureCount} (${failurePercentage}%)`,
+      );
+
+      return { totalSessions, avgLoadTimeMs, failureCount, failurePercentage };
+    } catch (error) {
+      this.logger.error('BQ15: Error computing homepage load metrics:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Calculate cancellation rate for confirmed bookings
    * Only counts cancellations that happened < 12 hours before scheduled start
    */
