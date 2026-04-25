@@ -12,7 +12,7 @@ export interface AvailableTutorResult {
   rating: number;
   hourlyRate: number | null;
   bio: string;
-  profileImage: string | null;
+  profilePictureUrl: string | null;
   location: string;
   courses: string[];
   nextAvailableSlot: {
@@ -20,6 +20,7 @@ export interface AvailableTutorResult {
     endDateTime: Date;
     location?: string;
     course?: string;
+    parentAvailabilityId?: string;
   } | null;
   availableSlotsCount: number;
 }
@@ -252,7 +253,7 @@ export class AnalyticsService {
                 ? raw.hourly_rate
                 : null,
             bio: raw.bio ?? '',
-            profileImage: raw.profileImage ?? null,
+            profilePictureUrl: raw.profilePictureUrl ?? null,
             location: raw.location ?? 'Virtual',
             courses: Array.isArray(raw.courses) ? raw.courses : [],
             nextAvailableSlot: {
@@ -260,6 +261,7 @@ export class AnalyticsService {
               endDateTime: new Date(next.endDateTime),
               location: next.location,
               course: next.course,
+              parentAvailabilityId: next.id,
             },
             availableSlotsCount: active.length,
           });
@@ -893,7 +895,7 @@ export class AnalyticsService {
           rating: typeof raw.rating === 'number' ? raw.rating : 0,
           hourlyRate: typeof raw.hourlyRate === 'number' ? raw.hourlyRate : null,
           bio: raw.bio ?? '',
-          profileImage: raw.profileImage ?? null,
+          profilePictureUrl: raw.profilePictureUrl ?? null,
           location: raw.location ?? 'Virtual',
           courses: Array.isArray(raw.courses) ? raw.courses : [],
           nextAvailableSlot: {
@@ -901,6 +903,7 @@ export class AnalyticsService {
             endDateTime: new Date(next.endDateTime),
             location: next.location,
             course: next.course,
+            parentAvailabilityId: next.id,
           },
           availableSlotsCount: active.length,
           bookingCount,
@@ -916,14 +919,15 @@ export class AnalyticsService {
 
   /**
    * BQ5: Get booking success rate data
-   * Instant booking = tutorApprovalStatus === 'approved' AND status === 'scheduled'
-   * Returns summary stats + 7-day daily breakdown for instant vs manual bookings
+   * Instant attempt  = tutorApprovalStatus === 'approved'
+   * Succeeded instant = tutorApprovalStatus === 'approved' AND status in ['scheduled', 'completed']
+   * Success rate = succeededInstant / totalInstantAttempts
    */
   async getBookingSuccessData(): Promise<{
-    summary: { totalBookings: number; instantConfirmations: number; successRate: number };
+    summary: { totalInstantAttempts: number; instantConfirmations: number; successRate: number };
     dates: string[];
     instantByDay: number[];
-    manualByDay: number[];
+    failedByDay: number[];
   }> {
     const db = this.firebaseService.getFirestore();
     const snapshot = await db.collection('tutoring_sessions').get();
@@ -933,7 +937,7 @@ export class AnalyticsService {
 
     const dates: string[] = [];
     const instantByDay = new Map<string, number>();
-    const manualByDay = new Map<string, number>();
+    const failedByDay = new Map<string, number>();
 
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
@@ -941,45 +945,171 @@ export class AnalyticsService {
       const dateStr = date.toISOString().split('T')[0];
       dates.push(dateStr);
       instantByDay.set(dateStr, 0);
-      manualByDay.set(dateStr, 0);
+      failedByDay.set(dateStr, 0);
     }
 
-    let totalBookings = 0;
+    let totalInstantAttempts = 0;
     let instantConfirmations = 0;
 
     snapshot.forEach((doc) => {
       const data = doc.data();
-      totalBookings++;
 
-      const isInstant =
-        data.tutorApprovalStatus === 'approved' && data.status === 'scheduled';
-      if (isInstant) instantConfirmations++;
+      const isInstantAttempt = data.tutorApprovalStatus === 'approved';
+      if (!isInstantAttempt) return;
+
+      totalInstantAttempts++;
+
+      const succeeded = data.status === 'scheduled' || data.status === 'completed';
+      if (succeeded) instantConfirmations++;
 
       const createdAt = this.safeToDate(data.createdAt);
       if (createdAt && createdAt >= sevenDaysAgo) {
         const dateStr = createdAt.toISOString().split('T')[0];
-        if (isInstant) {
+        if (succeeded) {
           instantByDay.set(dateStr, (instantByDay.get(dateStr) || 0) + 1);
         } else {
-          manualByDay.set(dateStr, (manualByDay.get(dateStr) || 0) + 1);
+          failedByDay.set(dateStr, (failedByDay.get(dateStr) || 0) + 1);
         }
       }
     });
 
     const successRate =
-      totalBookings > 0
-        ? Math.round((instantConfirmations / totalBookings) * 10000) / 100
+      totalInstantAttempts > 0
+        ? Math.round((instantConfirmations / totalInstantAttempts) * 10000) / 100
         : 0;
 
     this.logger.log(
-      `BQ5: Total: ${totalBookings}, Instant: ${instantConfirmations}, Rate: ${successRate}%`,
+      `BQ5: Instant attempts: ${totalInstantAttempts}, Succeeded: ${instantConfirmations}, Rate: ${successRate}%`,
     );
 
     return {
-      summary: { totalBookings, instantConfirmations, successRate },
+      summary: { totalInstantAttempts, instantConfirmations, successRate },
       dates,
       instantByDay: dates.map((d) => instantByDay.get(d) || 0),
-      manualByDay: dates.map((d) => manualByDay.get(d) || 0),
+      failedByDay: dates.map((d) => failedByDay.get(d) || 0),
+    };
+  }
+
+  /**
+   * BQ10: Percentage of sessions booked from carousel vs standard search
+   */
+  async getBookingSourceStats(): Promise<{
+    totalSessions: number;
+    carouselBookings: number;
+    otherBookings: number;
+    carouselPercentage: number;
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('tutoring_sessions').get();
+
+    let totalSessions = 0;
+    let carouselBookings = 0;
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      totalSessions++;
+      if (data.bookingSource === 'carousel') {
+        carouselBookings++;
+      }
+    });
+
+    const otherBookings = totalSessions - carouselBookings;
+    const carouselPercentage =
+      totalSessions > 0
+        ? Math.round((carouselBookings / totalSessions) * 10000) / 100
+        : 0;
+
+    this.logger.log(
+      `BQ10: Total: ${totalSessions}, Carousel: ${carouselBookings}, Other: ${otherBookings}, %: ${carouselPercentage}`,
+    );
+
+    return { totalSessions, carouselBookings, otherBookings, carouselPercentage };
+  }
+
+  /**
+   * BQ2: Carousel interaction dashboard data (last 7 days).
+   */
+  async getBQ2DashboardData(): Promise<{
+    dates: string[];
+    impressions: number[];
+    clicks: number[];
+    bookings: number[];
+    topTutors: Array<{ tutorId: string; clicks: number }>;
+    countdownBuckets: Array<{ bucket: string; count: number }>;
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('carouselEvents').get();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dates: string[] = [];
+    const impressionsByDay = new Map<string, number>();
+    const clicksByDay = new Map<string, number>();
+    const bookingsByDay = new Map<string, number>();
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      dates.push(dateStr);
+      impressionsByDay.set(dateStr, 0);
+      clicksByDay.set(dateStr, 0);
+      bookingsByDay.set(dateStr, 0);
+    }
+
+    const tutorClicks = new Map<string, number>();
+    const countdown = new Map<string, number>([
+      ['0-15', 0],
+      ['16-30', 0],
+      ['31-60', 0],
+      ['61+', 0],
+    ]);
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const ts = this.safeToDate(data.timestamp);
+      if (!ts || ts < sevenDaysAgo) return;
+
+      const dateStr = ts.toISOString().split('T')[0];
+      const event = String(data.event ?? '');
+
+      if (event === 'results_shown') {
+        impressionsByDay.set(dateStr, (impressionsByDay.get(dateStr) || 0) + 1);
+      } else if (event === 'tutor_clicked') {
+        clicksByDay.set(dateStr, (clicksByDay.get(dateStr) || 0) + 1);
+        if (data.tutorId) {
+          const tutorId = String(data.tutorId);
+          tutorClicks.set(tutorId, (tutorClicks.get(tutorId) || 0) + 1);
+        }
+      } else if (event === 'booking_completed') {
+        bookingsByDay.set(dateStr, (bookingsByDay.get(dateStr) || 0) + 1);
+      }
+
+      if (typeof data.countdownMinutes === 'number') {
+        const m = data.countdownMinutes;
+        const bucket = m <= 15 ? '0-15' : m <= 30 ? '16-30' : m <= 60 ? '31-60' : '61+';
+        countdown.set(bucket, (countdown.get(bucket) || 0) + 1);
+      }
+    });
+
+    const topTutors = [...tutorClicks.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tutorId, clicks]) => ({ tutorId, clicks }));
+
+    const countdownBuckets = [...countdown.entries()].map(([bucket, count]) => ({
+      bucket,
+      count,
+    }));
+
+    return {
+      dates,
+      impressions: dates.map((d) => impressionsByDay.get(d) || 0),
+      clicks: dates.map((d) => clicksByDay.get(d) || 0),
+      bookings: dates.map((d) => bookingsByDay.get(d) || 0),
+      topTutors,
+      countdownBuckets,
     };
   }
 
@@ -1010,102 +1140,6 @@ export class AnalyticsService {
     this.logger.log(`BQ2: Carousel event saved – ${event}, course: ${courseId}`);
   }
 
-  /**
-   * BQ2: Compute carousel funnel metrics for the last 7 days.
-   * Returns impressions, clicks, bookings per day plus aggregate rates.
-   */
-  async getBQ2DashboardData(): Promise<{
-    summary: { ctr: number; conversionRate: number; emptyResultRate: number; totalBookings: number };
-    dates: string[];
-    impressions: number[];
-    clicks: number[];
-    bookings: number[];
-    topTutors: { tutorId: string; clicks: number }[];
-    countdownBuckets: { label: string; count: number }[];
-  }> {
-    const db = this.firebaseService.getFirestore();
-    const snapshot = await db.collection('carouselEvents').get();
-
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    const dates: string[] = [];
-    const impressionsByDay = new Map<string, number>();
-    const clicksByDay = new Map<string, number>();
-    const bookingsByDay = new Map<string, number>();
-
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().split('T')[0];
-      dates.push(key);
-      impressionsByDay.set(key, 0);
-      clicksByDay.set(key, 0);
-      bookingsByDay.set(key, 0);
-    }
-
-    let totalImpressions = 0;
-    let totalClicks = 0;
-    let totalBookings = 0;
-    let emptyResults = 0;
-    const tutorClickMap = new Map<string, number>();
-    const buckets = { '<30min': 0, '30-60min': 0, '1-2h': 0, '2-4h': 0 };
-
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      const ts: Date = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
-      if (ts < sevenDaysAgo) return;
-
-      const dateKey = ts.toISOString().split('T')[0];
-
-      switch (data.event) {
-        case 'results_shown':
-          totalImpressions++;
-          impressionsByDay.set(dateKey, (impressionsByDay.get(dateKey) ?? 0) + 1);
-          if ((data.resultCount ?? 1) === 0) emptyResults++;
-          break;
-        case 'tutor_clicked':
-          totalClicks++;
-          clicksByDay.set(dateKey, (clicksByDay.get(dateKey) ?? 0) + 1);
-          if (data.tutorId) tutorClickMap.set(data.tutorId, (tutorClickMap.get(data.tutorId) ?? 0) + 1);
-          if (typeof data.countdownMinutes === 'number') {
-            const m = data.countdownMinutes;
-            if (m < 30) buckets['<30min']++;
-            else if (m < 60) buckets['30-60min']++;
-            else if (m < 120) buckets['1-2h']++;
-            else buckets['2-4h']++;
-          }
-          break;
-        case 'booking_completed':
-          totalBookings++;
-          bookingsByDay.set(dateKey, (bookingsByDay.get(dateKey) ?? 0) + 1);
-          break;
-      }
-    });
-
-    const ctr = totalImpressions > 0 ? Math.round((totalClicks / totalImpressions) * 100) : 0;
-    const conversionRate = totalClicks > 0 ? Math.round((totalBookings / totalClicks) * 100) : 0;
-    const emptyResultRate = totalImpressions > 0 ? Math.round((emptyResults / totalImpressions) * 100) : 0;
-
-    const topTutors = [...tutorClickMap.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([tutorId, clicks]) => ({ tutorId, clicks }));
-
-    const countdownBuckets = Object.entries(buckets).map(([label, count]) => ({ label, count }));
-
-    this.logger.log(`BQ2: Dashboard – impressions:${totalImpressions}, clicks:${totalClicks}, bookings:${totalBookings}`);
-
-    return {
-      summary: { ctr, conversionRate, emptyResultRate, totalBookings },
-      dates,
-      impressions: dates.map((d) => impressionsByDay.get(d) ?? 0),
-      clicks: dates.map((d) => clicksByDay.get(d) ?? 0),
-      bookings: dates.map((d) => bookingsByDay.get(d) ?? 0),
-      topTutors,
-      countdownBuckets,
-    };
-  }
 
   /**
    * BQ1: Save a bug report to Firestore
@@ -1152,9 +1186,10 @@ export class AnalyticsService {
    * - Crashes: app crashes
    * - Bugs: user-reported bugs
    * - Latency Issues: API requests that exceeded 2 second threshold
+   * - Cancellation Rate: % of confirmed bookings cancelled <12h before start
    */
   async getDashboardData(): Promise<{
-    summary: { crashes: number; bugs: number; latencyIssues: number };
+    summary: { crashes: number; bugs: number; latencyIssues: number; cancellationRate: number; totalCancellations: number };
     dates: string[];
     crashes: number[];
     bugs: number[];
@@ -1216,8 +1251,11 @@ export class AnalyticsService {
       }
     });
 
+    // Calculate cancellation rate
+    const { cancellationRate, totalCancellations, totalConfirmed } = await this.calculateCancellationRate();
+
     this.logger.log(
-      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}`,
+      `BQ1: Dashboard data - Crashes: ${totalCrashes}, Bugs: ${totalBugs}, Latency Issues: ${totalLatencyIssues}, Cancellations: ${totalCancellations}/${totalConfirmed} (${cancellationRate}%)`,
     );
 
     return {
@@ -1225,11 +1263,151 @@ export class AnalyticsService {
         crashes: totalCrashes,
         bugs: totalBugs,
         latencyIssues: totalLatencyIssues,
+        cancellationRate,
+        totalCancellations,
       },
       dates,
       crashes: dates.map((d) => crashesByDay.get(d) || 0),
       bugs: dates.map((d) => bugsByDay.get(d) || 0),
       latencyIssues: dates.map((d) => latencyIssuesByDay.get(d) || 0),
     };
+  }
+
+  /**
+   * BQ15: Log homepage load time telemetry to Firestore (telemetry_bq15 collection)
+   * @param loadTimeMs Load time in milliseconds
+   * @param connectivityStatus Network connectivity status at load time
+   * @param userId Optional Firebase UID of the logged-in user
+   * @returns Firestore document ID
+   */
+  async logHomepageLoadTime(
+    loadTimeMs: number,
+    connectivityStatus: 'online' | 'offline',
+    userId?: string,
+  ): Promise<string> {
+    const db = this.firebaseService.getFirestore();
+
+    const docRef = await db.collection('telemetry_bq15').add({
+      event_type: 'homepage_load',
+      load_time_ms: loadTimeMs,
+      timestamp: new Date(),
+      user_id: userId ?? null,
+      connectivity_status: connectivityStatus,
+    });
+
+    this.logger.log(
+      `BQ15: Homepage load logged – ${loadTimeMs}ms, connectivity: ${connectivityStatus}, doc: ${docRef.id}`,
+    );
+
+    return docRef.id;
+  }
+
+  /**
+   * BQ15: Compute homepage load time performance metrics
+   * Answers: does avg load time exceed 2 s? In what % of sessions is the 2 s target missed?
+   */
+  async getHomepageLoadMetrics(): Promise<{
+    totalSessions: number;
+    avgLoadTimeMs: number;
+    failureCount: number;
+    failurePercentage: number;
+  }> {
+    try {
+      this.logger.log('BQ15: Computing homepage load time metrics');
+
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db
+        .collection('telemetry_bq15')
+        .where('event_type', '==', 'homepage_load')
+        .get();
+
+      if (snapshot.empty) {
+        this.logger.warn('BQ15: No homepage load telemetry found');
+        return { totalSessions: 0, avgLoadTimeMs: 0, failureCount: 0, failurePercentage: 0 };
+      }
+
+      let totalLoadTimeMs = 0;
+      let failureCount = 0;
+      const totalSessions = snapshot.size;
+
+      snapshot.forEach((doc) => {
+        const loadTimeMs: number =
+          typeof doc.data().load_time_ms === 'number' ? doc.data().load_time_ms : 0;
+        totalLoadTimeMs += loadTimeMs;
+        if (loadTimeMs > 2000) failureCount++;
+      });
+
+      const avgLoadTimeMs =
+        totalSessions > 0 ? Math.round(totalLoadTimeMs / totalSessions) : 0;
+      const failurePercentage =
+        totalSessions > 0
+          ? Math.round((failureCount / totalSessions) * 10000) / 100
+          : 0;
+
+      this.logger.log(
+        `BQ15: Sessions: ${totalSessions}, Avg: ${avgLoadTimeMs}ms, Failures (>2s): ${failureCount} (${failurePercentage}%)`,
+      );
+
+      return { totalSessions, avgLoadTimeMs, failureCount, failurePercentage };
+    } catch (error) {
+      this.logger.error('BQ15: Error computing homepage load metrics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate cancellation rate for confirmed bookings
+   * Only counts cancellations that happened < 12 hours before scheduled start
+   */
+  private async calculateCancellationRate(): Promise<{
+    cancellationRate: number;
+    totalCancellations: number;
+    totalConfirmed: number;
+  }> {
+    try {
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db.collection('tutoring_sessions').where('status', '==', 'confirmed').get();
+
+      let totalConfirmed = 0;
+      let totalCancellations = 0;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        totalConfirmed++;
+
+        // Check if session was cancelled
+        if (data.cancelledAt) {
+          const scheduledStart = data.scheduledStart?.toDate
+            ? data.scheduledStart.toDate()
+            : new Date(data.scheduledStart);
+          
+          const cancelledAt = data.cancelledAt?.toDate
+            ? data.cancelledAt.toDate()
+            : new Date(data.cancelledAt);
+
+          // Calculate hours between cancellation and scheduled start
+          const hoursBeforeStart = (scheduledStart.getTime() - cancelledAt.getTime()) / (1000 * 60 * 60);
+
+          // Only count if cancelled less than 12 hours before start
+          if (hoursBeforeStart < 12 && hoursBeforeStart > 0) {
+            totalCancellations++;
+          }
+        }
+      });
+
+      const cancellationRate =
+        totalConfirmed > 0
+          ? Math.round((totalCancellations / totalConfirmed) * 10000) / 100
+          : 0;
+
+      this.logger.log(
+        `Cancellation Rate: ${totalCancellations}/${totalConfirmed} = ${cancellationRate}%`,
+      );
+
+      return { cancellationRate, totalCancellations, totalConfirmed };
+    } catch (error) {
+      this.logger.error('Error calculating cancellation rate:', error);
+      return { cancellationRate: 0, totalCancellations: 0, totalConfirmed: 0 };
+    }
   }
 }

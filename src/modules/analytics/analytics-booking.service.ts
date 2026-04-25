@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AnalyticsService, AvailableTutorResult } from './analytics.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
+import { SlotBookingRepository } from '../tutoring-session/slot-booking.repository';
 
 export interface BookableTutorResult extends AvailableTutorResult {
   nextAvailableSlot: {
@@ -20,6 +21,7 @@ export class AnalyticsBookingService {
   constructor(
     private readonly analyticsService: AnalyticsService,
     private readonly availabilityRepository: AvailabilityRepository,
+    private readonly slotBookingRepository: SlotBookingRepository,
   ) {}
 
   async getBookableTutorsForCourse(
@@ -37,7 +39,7 @@ export class AnalyticsBookingService {
     const windowStart = new Date(now.getTime() - 60 * 60 * 1000);
     const windowEnd = new Date(now.getTime() + withinHours * 60 * 60 * 1000);
 
-    return await Promise.all(
+    const results = await Promise.all(
       tutors.map(async (tutor) => {
         try {
           const availabilities = await this.availabilityRepository.findByTutorAndDateRange(
@@ -50,27 +52,41 @@ export class AnalyticsBookingService {
             (a) => a.endDateTime && new Date(a.endDateTime) > now,
           );
 
-          if (active.length === 0) return { ...tutor };
+          if (active.length === 0) return null;
 
           const sorted = [...active].sort(
             (a, b) =>
               new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime(),
           );
-          const next = sorted[0];
 
-          return {
-            ...tutor,
-            nextAvailableSlot: {
-              ...tutor.nextAvailableSlot!,
-              parentAvailabilityId: next.id,
-              slotIndex: 0,
-            },
-          };
+          // Find the first slot that hasn't been booked yet
+          for (const slot of sorted) {
+            const existingBooking = await this.slotBookingRepository.findByParentAndIndex(
+            slot.id!,
+            0,
+            );
+
+            if (!existingBooking) {
+              return {
+                ...tutor,
+                nextAvailableSlot: {
+                  ...tutor.nextAvailableSlot!,
+                  parentAvailabilityId: slot.id,
+                  slotIndex: 0,
+                },
+              } as BookableTutorResult;
+            }
+          }
+
+          // All slots for this tutor are booked
+          return null;
         } catch (err) {
           this.logger.warn(`Could not enrich tutor ${tutor.id}:`, err);
-          return { ...tutor };
+          return { ...tutor } as BookableTutorResult;
         }
       }),
     );
+
+    return results.filter((t): t is BookableTutorResult => t !== null);
   }
 }

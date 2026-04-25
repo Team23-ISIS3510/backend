@@ -25,6 +25,7 @@ export class UserRepository {
       courses: data.courses,
       rating: typeof data.rating === 'number' ? data.rating : undefined,
       description: data['description'],
+      profilePictureUrl: data.profilePictureUrl,
       createdAt: this.firebase.parseDate(data.createdAt) ?? new Date(),
       updatedAt: this.firebase.parseDate(data.updatedAt) ?? new Date(),
     };
@@ -78,6 +79,7 @@ export class UserRepository {
     if (dto.isTutor !== undefined) patch.isTutor = dto.isTutor;
     if (dto.courses !== undefined) patch.courses = dto.courses;
     if (dto.description !== undefined) patch.description = dto.description;
+    if (dto.profilePictureUrl !== undefined) patch.profilePictureUrl = dto.profilePictureUrl;
     if (dto.isTutor === false) patch.courses = [];
   
     await docRef.update(patch);

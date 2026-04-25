@@ -22,7 +22,11 @@
     "setup-admin-oauth": "node scripts/setup-admin-oauth.js",
     "reset-seed": "node scripts/reset-seed-firebase.js",
     "seed-demo": "node scripts/seed-demo.js",
-    "seed-demo:clean": "node scripts/seed-demo.js --clean"
+    "seed-demo:clean": "node scripts/seed-demo.js --clean",
+    "seed:minimal": "node scripts/seed-firestore-minimal.js",
+    "seed:minimal:clean": "node scripts/seed-firestore-minimal.js --clean",
+    "seed:fc-mock": "node scripts/seed-feature-correlation-mock.js",
+    "seed:fc-mock:clean": "node scripts/seed-feature-correlation-mock.js --clean"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",

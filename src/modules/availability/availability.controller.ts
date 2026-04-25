@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Delete, Query, Body, Param, HttpException, HttpStatus, Logger, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Query, Body, Param, HttpException, HttpStatus, Logger, Req } from '@nestjs/common';
 import { AvailabilityService } from './availability.service';
 import { SlotService } from '../availability/slot.service';
 import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
 import { CheckEventDto, SyncAvailabilityDto, SyncSpecificEventsDto } from '../availability/dto/sync-availability.dto';
 import { CreateAvailabilityDto } from '../availability/dto/create-availability.dto';
+import { UpdateAvailabilityDto } from '../availability/dto/update-availability.dto';
 import { AvailabilityResponseDto } from '../availability/dto/availability-response.dto';
 import {
   GetMultipleTutorsAvailabilityDto,
@@ -52,6 +53,48 @@ export class AvailabilityController {
           error: error.message || 'Error fetching availabilities',
           availabilities: [],
           totalCount: 0,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiOperation({ summary: 'Create a new availability' })
+  @ApiResponse({ status: 201, description: 'Availability created successfully.' })
+  @ApiBody({ type: CreateAvailabilityDto })
+  @Post('create')
+  async createAvailability(@Body() createDto: CreateAvailabilityDto) {
+    try {
+      if (!createDto.tutorId || !createDto.title || !createDto.date || !createDto.startTime || !createDto.endTime) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'Missing required fields: tutorId, title, date, startTime, endTime',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Create availability requested for tutor: ${createDto.tutorId}`);
+
+      const created = await this.availabilityService.createAvailability(createDto);
+
+      return {
+        success: true,
+        message: 'Disponibilidad creada exitosamente',
+        availability: created,
+      };
+    } catch (error) {
+      this.logger.error('Error creating availability:', error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        {
+          success: false,
+          error: error.message || 'Error creando disponibilidad',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -364,6 +407,51 @@ export class AvailabilityController {
     }
   }
 
+  @ApiOperation({ summary: 'Update an existing availability' })
+  @ApiResponse({ status: 200, description: 'Availability updated successfully.' })
+  @ApiBody({ type: UpdateAvailabilityDto })
+  @Put(':availabilityId')
+  async updateAvailability(
+    @Param('availabilityId') availabilityId: string,
+    @Body() updateDto: UpdateAvailabilityDto,
+  ) {
+    try {
+      if (!availabilityId) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'availabilityId es requerido',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Update availability requested: ${availabilityId}`);
+
+      const updated = await this.availabilityService.updateAvailability(availabilityId, updateDto);
+
+      return {
+        success: true,
+        message: 'Disponibilidad actualizada exitosamente',
+        availability: updated,
+      };
+    } catch (error) {
+      this.logger.error('Error updating availability:', error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        {
+          success: false,
+          error: error.message || 'Error actualizando disponibilidad',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @ApiOperation({ summary: 'Delete availability event from Google Calendar and Firebase' })
   @ApiResponse({ status: 200, description: 'Event deleted successfully.' })
   @ApiQuery({ name: 'eventId', required: true })
@@ -414,6 +502,87 @@ export class AvailabilityController {
         {
           success: false,
           error: error.message || 'Error eliminando evento de disponibilidad',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiOperation({ summary: 'Delete availability by availabilityId (Firebase only)' })
+  @ApiResponse({ status: 200, description: 'Availability deleted successfully.' })
+  @Delete(':availabilityId')
+  async deleteAvailabilityById(@Param('availabilityId') availabilityId: string) {
+    try {
+      if (!availabilityId) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'availabilityId es requerido',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Delete availability requested: ${availabilityId}`);
+
+      await this.availabilityService.deleteAvailability(availabilityId);
+
+      return {
+        success: true,
+        message: 'Disponibilidad eliminada exitosamente',
+      };
+    } catch (error) {
+      this.logger.error('Error deleting availability by id:', error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        {
+          success: false,
+          error: error.message || 'Error eliminando disponibilidad',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiOperation({ summary: 'Delete all availabilities for a tutor' })
+  @ApiResponse({ status: 200, description: 'Availabilities deleted successfully.' })
+  @Delete('tutor/:tutorId')
+  async deleteAvailabilitiesByTutor(@Param('tutorId') tutorId: string) {
+    try {
+      if (!tutorId) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'tutorId es requerido',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Delete all availabilities requested for tutor: ${tutorId}`);
+
+      const deletedCount = await this.availabilityService.deleteAvailabilitiesByTutor(tutorId);
+
+      return {
+        success: true,
+        message: 'Disponibilidades eliminadas exitosamente',
+        deletedCount,
+      };
+    } catch (error) {
+      this.logger.error('Error deleting availabilities by tutor:', error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        {
+          success: false,
+          error: error.message || 'Error eliminando disponibilidades del tutor',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );

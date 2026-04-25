@@ -390,6 +390,7 @@ export class TutoringSessionRepository {
       rescheduledReason: data.rescheduledReason,
       completedAt: data.completedAt?.toDate(),
       paymentProof: data.paymentProof,
+      bookingSource: data.bookingSource,
       tutorEmail: data.tutorEmail,
       studentEmail: data.studentEmail,
       studentName: data.studentName,

@@ -7,6 +7,7 @@ import { CalendarService } from '../../modules/calendar/calendar.service';
 import { SlotService } from '../../modules/availability/slot.service';
 import { Slot } from '../../modules/availability/slot.service';
 import { AvailabilityOccupancyUpdateService } from './availability-occupancy-update.service';
+import { UserService } from '../user/user.service';
 
 @Injectable()
 export class AvailabilityService {
@@ -17,7 +18,35 @@ export class AvailabilityService {
     private readonly calendarService: CalendarService,
     private readonly slotService: SlotService,
     private readonly occupancyUpdateService: AvailabilityOccupancyUpdateService,
+    private readonly userService: UserService,
   ) {}
+
+  private async resolveTutorIdentifiers(tutorId: string): Promise<string[]> {
+    const normalized = tutorId.trim();
+    if (!normalized) {
+      return [];
+    }
+
+    const ids = new Set<string>([normalized]);
+
+    try {
+      if (normalized.includes('@')) {
+        const userByEmail = await this.userService.getUserByEmail(normalized);
+        if (userByEmail?.id) {
+          ids.add(userByEmail.id);
+        }
+      } else {
+        const userById = await this.userService.findByIdOrNull(normalized);
+        if (userById?.email) {
+          ids.add(userById.email);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Could not resolve tutor aliases for ${normalized}: ${error.message}`);
+    }
+
+    return Array.from(ids);
+  }
 
   async getAvailabilityById(id: string): Promise<AvailabilityResponseDto | null> {
     try {
@@ -42,15 +71,44 @@ export class AvailabilityService {
         const start = new Date(startDate);
         const end = new Date(endDate);
         const effectiveLimit = limit ?? 200;
-        availabilities = await this.availabilityRepository.findByTutorAndDateRange(
-          tutorId,
-          start,
-          end,
-          effectiveLimit,
-        );
+        const tutorIdentifiers = await this.resolveTutorIdentifiers(tutorId);
+        const merged = new Map<string, Availability>();
+
+        for (const tutorIdentifier of tutorIdentifiers) {
+          const partial = await this.availabilityRepository.findByTutorAndDateRange(
+            tutorIdentifier,
+            start,
+            end,
+            effectiveLimit,
+          );
+          partial.forEach((item) => {
+            if (item.id) {
+              merged.set(item.id, item);
+            }
+          });
+        }
+
+        availabilities = Array.from(merged.values())
+          .sort((a, b) => (a.startDateTime?.getTime() ?? 0) - (b.startDateTime?.getTime() ?? 0))
+          .slice(0, effectiveLimit);
       } else if (tutorId) {
         // Get availabilities for specific tutor
-        availabilities = await this.availabilityRepository.findByTutor(tutorId, limit);
+        const effectiveLimit = limit ?? 50;
+        const tutorIdentifiers = await this.resolveTutorIdentifiers(tutorId);
+        const merged = new Map<string, Availability>();
+
+        for (const tutorIdentifier of tutorIdentifiers) {
+          const partial = await this.availabilityRepository.findByTutor(tutorIdentifier, effectiveLimit);
+          partial.forEach((item) => {
+            if (item.id) {
+              merged.set(item.id, item);
+            }
+          });
+        }
+
+        availabilities = Array.from(merged.values())
+          .sort((a, b) => (a.startDateTime?.getTime() ?? 0) - (b.startDateTime?.getTime() ?? 0))
+          .slice(0, effectiveLimit);
       } else if (course) {
         // Get availabilities by course
         availabilities = await this.availabilityRepository.findByCourse(course, limit);
@@ -120,12 +178,171 @@ export class AvailabilityService {
     }
   }
 
-  async deleteAvailability(googleEventId: string): Promise<void> {
+  async createAvailability(createDto: any): Promise<AvailabilityResponseDto> {
     try {
-      await this.availabilityRepository.delete(googleEventId);
-      this.logger.log(`Availability deleted from Firebase: ${googleEventId}`);
+      const { tutorId, title, date, startTime, endTime, location, description, course } = createDto;
+
+      // Validations
+      if (!tutorId || !title || !date || !startTime || !endTime) {
+        throw new Error('Missing required fields: tutorId, title, date, startTime, endTime');
+      }
+
+      if (startTime >= endTime) {
+        throw new Error('Start time must be before end time');
+      }
+
+      // Parse times
+      const [startHour, startMin] = startTime.split(':').map(Number);
+      const [endHour, endMin] = endTime.split(':').map(Number);
+
+      if (isNaN(startHour) || isNaN(startMin) || isNaN(endHour) || isNaN(endMin)) {
+        throw new Error('Invalid time format. Use HH:MM');
+      }
+
+      // Create DateTime objects
+      const startDateTime = new Date(`${date}T${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00Z`);
+      const endDateTime = new Date(`${date}T${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00Z`);
+
+      if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+        throw new Error('Invalid date format. Use YYYY-MM-DD');
+      }
+
+      // Create availability object
+      const availabilityData: Partial<Availability> = {
+        tutorId,
+        title,
+        startDateTime,
+        endDateTime,
+        location,
+        description,
+        course,
+        recurring: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Save to Firebase (without googleEventId for now)
+      const id = await this.availabilityRepository.save(undefined, availabilityData);
+      this.logger.log(`Availability created: ${id}`);
+
+      // Fetch and return the created availability
+      const created = await this.availabilityRepository.findById(id);
+      if (!created) {
+        throw new Error('Failed to retrieve created availability');
+      }
+
+      return AvailabilityResponseDto.fromEntity(created);
+    } catch (error) {
+      this.logger.error('Error creating availability:', error);
+      throw error;
+    }
+  }
+
+  async deleteAvailability(availabilityId: string): Promise<void> {
+    try {
+      const existing = await this.availabilityRepository.findById(availabilityId);
+      if (!existing) {
+        throw new NotFoundException(`Availability with ID ${availabilityId} not found`);
+      }
+
+      await this.availabilityRepository.delete(availabilityId);
+      this.logger.log(`Availability deleted from Firebase: ${availabilityId}`);
     } catch (error) {
       this.logger.error('Error deleting availability:', error);
+      throw error;
+    }
+  }
+
+  async deleteAvailabilitiesByTutor(tutorId: string): Promise<number> {
+    try {
+      if (!tutorId || tutorId.trim() === '') {
+        throw new Error('tutorId is required');
+      }
+
+      const tutorIdentifiers = await this.resolveTutorIdentifiers(tutorId);
+      let deletedCount = 0;
+
+      for (const tutorIdentifier of tutorIdentifiers) {
+        deletedCount += await this.availabilityRepository.deleteByTutorId(tutorIdentifier);
+      }
+
+      this.logger.log(`Deleted ${deletedCount} availabilities for tutor ${tutorId} (aliases: ${tutorIdentifiers.join(', ')})`);
+      return deletedCount;
+    } catch (error) {
+      this.logger.error(`Error deleting availabilities for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
+
+  async updateAvailability(
+    availabilityId: string,
+    updateData: any,
+  ): Promise<AvailabilityResponseDto> {
+    try {
+      // Get current availability
+      const current = await this.availabilityRepository.findById(availabilityId);
+      if (!current) {
+        throw new Error(`Availability with ID ${availabilityId} not found`);
+      }
+
+      // Prepare update payload
+      const updatePayload: any = {
+        ...current,
+      };
+
+      // Update title if provided
+      if (updateData.title) {
+        updatePayload.title = updateData.title;
+      }
+
+      // Update date and times if provided
+      if (updateData.date || updateData.startTime || updateData.endTime) {
+        const date = updateData.date || current.startDateTime.toISOString().split('T')[0];
+        const startTime = updateData.startTime || current.startDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        const endTime = updateData.endTime || current.endDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+        // Validate times
+        if (startTime >= endTime) {
+          throw new Error('Start time must be before end time');
+        }
+
+        // Parse times
+        const [startHour, startMin] = startTime.split(':').map(Number);
+        const [endHour, endMin] = endTime.split(':').map(Number);
+
+        const startDateTime = new Date(`${date}T${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00Z`);
+        const endDateTime = new Date(`${date}T${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00Z`);
+
+        if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+          throw new Error('Invalid date/time format');
+        }
+
+        updatePayload.startDateTime = startDateTime;
+        updatePayload.endDateTime = endDateTime;
+      }
+
+      // Update optional fields
+      if (updateData.location !== undefined) {
+        updatePayload.location = updateData.location;
+      }
+
+      if (updateData.description !== undefined) {
+        updatePayload.description = updateData.description;
+      }
+
+      if (updateData.course !== undefined) {
+        updatePayload.course = updateData.course;
+      }
+
+      // Update in repository
+      await this.availabilityRepository.save(availabilityId, updatePayload);
+      this.logger.log(`Availability updated: ${availabilityId}`);
+
+      // Return updated availability
+      const updated = await this.availabilityRepository.findById(availabilityId);
+      return AvailabilityResponseDto.fromEntity(updated);
+    } catch (error) {
+      this.logger.error('Error updating availability:', error);
       throw error;
     }
   }

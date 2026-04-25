@@ -3,48 +3,50 @@ import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiProperty } from '@nest
 import type { Request, Response } from 'express';
 import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
+import { AnalyticsFeatureCorrelationService } from './analytics-feature-correlation.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { CreateBugReportDto } from './dto/bug-report.dto';
 import { CreateCarouselEventDto } from './dto/carousel-event.dto';
+import { LogHomepageLoadDto } from './dto/homepage-load.dto';
 import { UserService } from '../user/user.service';
 import { TutoringSessionService } from '../tutoring-session/tutoring-session.service';
 import { FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
 
 class AvailableTutorsResponseDto {
   @ApiProperty({ example: true })
-  success: boolean;
+  success!: boolean;
 
   @ApiProperty({ example: 'ISIS3710' })
-  course: string;
+  course!: string;
 
   @ApiProperty({ example: 4.5 })
-  minRating: number;
+  minRating!: number;
 
   @ApiProperty({ example: 4 })
-  withinHours: number;
+  withinHours!: number;
 
   @ApiProperty({ example: { from: '2026-03-19T15:00:00.000Z', to: '2026-03-19T19:00:00.000Z' } })
-  queryWindow: { from: Date; to: Date };
+  queryWindow!: { from: Date; to: Date };
 
   @ApiProperty({ example: 3 })
-  count: number;
+  count!: number;
 
   @ApiProperty({ isArray: true })
-  tutors: AvailableTutorResult[];
+  tutors!: AvailableTutorResult[];
 }
 
 class ReturningTutorResponseDto {
   @ApiProperty({ example: true })
-  success: boolean;
+  success!: boolean;
 
   @ApiProperty({ example: 'user-uid-123' })
-  student: string;
+  student!: string;
 
   @ApiProperty({ example: 'ISIS3710' })
-  course: string;
+  course!: string;
 
   @ApiProperty({ nullable: true, description: 'Most-booked tutor with an upcoming slot, or null if none found' })
-  tutor: ReturningTutorResult | null;
+  tutor!: ReturningTutorResult | null;
 }
 
 @ApiTags('Analytics')
@@ -54,7 +56,8 @@ export class AnalyticsController {
 
   constructor(
     private readonly analyticsService: AnalyticsService,
-     private readonly analyticsBookingService: AnalyticsBookingService,
+    private readonly analyticsBookingService: AnalyticsBookingService,
+    private readonly featureCorrelationService: AnalyticsFeatureCorrelationService,
     private readonly userService: UserService,
     private readonly sessionService: TutoringSessionService,
   ) {}
@@ -317,8 +320,52 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ5: GET /analytics/booking-success
+   *
+   * Returns instant booking success rate and total bookings.
+   * Instant booking = tutorApprovalStatus === 'approved' AND status === 'scheduled'
+   */
+  @Get('booking-success')
+  @ApiOperation({
+    summary: 'BQ5: Booking success rate and total bookings',
+    description:
+      'Returns total bookings, instant confirmations, success rate percentage, ' +
+      'and a 7-day daily breakdown for instant vs manual bookings.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Booking success metrics',
+    schema: {
+      example: {
+        success: true,
+        totalBookings: 120,
+        instantConfirmations: 95,
+        successRate: 79.17,
+        dates: ['2026-04-13', '2026-04-14'],
+        instantByDay: [10, 8],
+        failedByDay: [3, 2],
+      },
+    },
+  })
+  async getBookingSuccess() {
+    try {
+      const data = await this.analyticsService.getBookingSuccessData();
+      return {
+        success: true,
+        ...data.summary,
+        dates: data.dates,
+        instantByDay: data.instantByDay,
+        failedByDay: data.failedByDay,
+      };
+    } catch (error) {
+      this.logger.error('BQ5: Error fetching booking success data:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ1: POST /analytics/bug
-   * 
+   *
    * Receives bug reports from the Kotlin mobile app
    * Stores crash reports, bugs, and other telemetry data
    */
@@ -379,11 +426,106 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ10: GET /analytics/booking-source-stats
+   *
+   * Returns breakdown of sessions booked via carousel vs standard search.
+   */
+  @Get('booking-source-stats')
+  @ApiOperation({
+    summary: 'BQ10: Booking source breakdown — carousel vs standard search',
+    description: 'Returns total sessions, carousel bookings, other bookings, and carousel percentage.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Booking source statistics',
+    schema: {
+      example: {
+        success: true,
+        totalSessions: 200,
+        carouselBookings: 80,
+        otherBookings: 120,
+        carouselPercentage: 40,
+      },
+    },
+  })
+  async getBookingSourceStats() {
+    try {
+      const data = await this.analyticsService.getBookingSourceStats();
+      return { success: true, ...data };
+    } catch (error) {
+      this.logger.error('BQ10: Error fetching booking source stats:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * BQ15: POST /analytics/homepage-load
+   * Receives homepage load time telemetry from the mobile app (non-blocking fire-and-forget).
+   */
+  @Post('homepage-load')
+  @ApiOperation({
+    summary: 'BQ15: Log homepage load time telemetry',
+    description:
+      'Receives and stores homepage load time measurements from the mobile app for performance monitoring. ' +
+      'Start time is when the homepage opens; end time is when all data (sessions, subjects) is rendered.',
+  })
+  @ApiResponse({ status: 201, description: 'Telemetry logged successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid request body' })
+  async logHomepageLoad(@Body() dto: LogHomepageLoadDto) {
+    this.logger.log(`BQ15: Received homepage load event – ${dto.load_time_ms}ms, connectivity: ${dto.connectivity_status}`);
+
+    const docId = await this.analyticsService.logHomepageLoadTime(
+      dto.load_time_ms,
+      dto.connectivity_status,
+      dto.user_id,
+    );
+
+    return {
+      success: true,
+      docId,
+      message: 'Homepage load time logged successfully',
+    };
+  }
+
+  /**
+   * BQ15: GET /analytics/homepage-load-metrics
+   * Returns computed homepage performance metrics.
+   */
+  @Get('homepage-load-metrics')
+  @ApiOperation({
+    summary: 'BQ15: Homepage load time performance metrics',
+    description:
+      'Returns average homepage load time and the percentage of sessions exceeding the 2-second threshold.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Homepage load time metrics',
+    schema: {
+      example: {
+        success: true,
+        totalSessions: 150,
+        avgLoadTimeMs: 1450,
+        failureCount: 30,
+        failurePercentage: 20,
+      },
+    },
+  })
+  async getHomepageLoadMetrics() {
+    try {
+      const data = await this.analyticsService.getHomepageLoadMetrics();
+      return { success: true, ...data };
+    } catch (error) {
+      this.logger.error('BQ15: Error fetching homepage load metrics:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ1: GET /analytics/dashboard
-   * 
+   *
    * Returns an HTML dashboard with minimalist design visualizing:
    * - System Stability: Crashes, User-Reported Bugs, and Latency Issues (7-day line chart)
-   * 
+   *
    * Latency Issue: API request that exceeded 2-second threshold
    */
   @Get('dashboard')
@@ -395,11 +537,22 @@ export class AnalyticsController {
   async getDashboard(@Res() res: Response) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bq2] = await Promise.all([
+    const [metrics, bq5, bq2, bq10, bqFc, bq15] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
       this.analyticsService.getBQ2DashboardData(),
+      this.analyticsService.getBookingSourceStats(),
+      this.featureCorrelationService.getStudentFeatureCorrelation(),
+      this.analyticsService.getHomepageLoadMetrics(),
     ]);
+
+    // Rank by abs(correlation) vs booking frequency for the chart; keep all for the table.
+    const bqFcRanked = [...bqFc.features]
+      .filter((f) => !f.lowSupport)
+      .sort(
+        (a, b) =>
+          Math.abs(b.bookingFrequency.correlation) - Math.abs(a.bookingFrequency.correlation),
+      );
 
     const html = `
 <!DOCTYPE html>
@@ -566,14 +719,31 @@ export class AnalyticsController {
       <canvas id="stabilityChart"></canvas>
     </div>
 
+    <!-- BQ3: Booking Cancellation Rate -->
+    <div class="section">
+      <h1 class="section-title">Booking Reliability</h1>
+      
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${metrics.summary.cancellationRate}%</div>
+          <div class="stat-label">Cancellation Rate</div>
+          <div style="font-size: 0.85rem; margin-top: 0.5rem; opacity: 0.8;">Cancelled <12h before start</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${metrics.summary.totalCancellations}</div>
+          <div class="stat-label">Late Cancellations</div>
+        </div>
+      </div>
+    </div>
+
     <!-- BQ5: Instant Booking Success Rate -->
     <div class="section">
       <h1 class="section-title">Instant Booking Success Rate</h1>
 
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-value">${bq5.summary.totalBookings}</div>
-          <div class="stat-label">Total Bookings</div>
+          <div class="stat-value">${bq5.summary.totalInstantAttempts}</div>
+          <div class="stat-label">Total Instant Attempts</div>
         </div>
         <div class="stat-card instant">
           <div class="stat-value">${bq5.summary.instantConfirmations}</div>
@@ -591,45 +761,147 @@ export class AnalyticsController {
       </div>
     </div>
 
+    <!-- BQ10: Booking Source -->
+    <div class="section">
+      <h1 class="section-title">Booking Source — Carousel vs Search (BQ10)</h1>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${bq10.totalSessions}</div>
+          <div class="stat-label">Total Sessions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--booking)">${bq10.carouselBookings}</div>
+          <div class="stat-label">From Carousel</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--manual)">${bq10.otherBookings}</div>
+          <div class="stat-label">From Search / Other</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--impression)">${bq10.carouselPercentage}%</div>
+          <div class="stat-label">Carousel Share</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>Carousel vs Other Bookings</h2>
+        <canvas id="bookingSourceChart"></canvas>
+      </div>
+    </div>
+
     <!-- BQ2: Tutor Carousel Performance -->
     <div class="section">
       <h1 class="section-title">Tutor Carousel Performance (BQ2)</h1>
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" style="color:var(--impression)">${bq2.summary.ctr}%</div>
-          <div class="stat-label">Click-Through Rate</div>
+    <!-- BQ-FC: Student Feature Correlation with Booking Outcomes -->
+    <div class="section">
+      <h1 class="section-title">Student Feature Correlation (BQ)</h1>
+      <p style="color:var(--muted); margin-top:-0.75rem; margin-bottom:1.25rem; max-width:70ch">
+        Which student-side features correlate most strongly with higher booking frequency and repeat-session
+        rates? Cohort: <strong>${bqFc.cohort.totalStudents}</strong> students,
+        <strong>${bqFc.cohort.totalSessions}</strong> sessions over the last
+        <strong>${bqFc.meta.analysisWindowDays}</strong> days.
+        Avg frequency: <strong>${bqFc.cohort.averageBookingFrequency}</strong> sessions/week ·
+        Avg repeat rate: <strong>${(bqFc.cohort.averageRepeatSessionRate * 100).toFixed(1)}%</strong>.
+        Scoring: point-biserial correlation + uplift (mean_with − mean_without).
+      </p>
+
+      <div class="stats-grid" style="grid-template-columns: 1fr 1fr">
+        <div class="chart-card">
+          <h2>Correlation with Booking Frequency</h2>
+          <canvas id="bqFcFreqChart"></canvas>
         </div>
-        <div class="stat-card">
-          <div class="stat-value" style="color:var(--booking)">${bq2.summary.conversionRate}%</div>
-          <div class="stat-label">Booking Conversion</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" style="color:var(--crash)">${bq2.summary.emptyResultRate}%</div>
-          <div class="stat-label">Empty Result Rate</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" style="color:var(--booking)">${bq2.summary.totalBookings}</div>
-          <div class="stat-label">Carousel Bookings</div>
+        <div class="chart-card">
+          <h2>Correlation with Repeat-Session Rate</h2>
+          <canvas id="bqFcRepeatChart"></canvas>
         </div>
       </div>
 
-      <div class="chart-card" style="margin-bottom:1.5rem">
-        <h2>Impressions · Clicks · Bookings (Last 7 Days)</h2>
-        <canvas id="carouselFunnelChart"></canvas>
+      <div class="chart-card" style="margin-top:1.5rem">
+        <h2>Uplift Over Time — Top Feature (Booking Frequency)</h2>
+        <canvas id="bqFcTrendChart"></canvas>
       </div>
 
-      <div class="stats-grid">
-        <div class="chart-card">
-          <h2>Top Clicked Tutors</h2>
-          <canvas id="topTutorsChart"></canvas>
-        </div>
-        <div class="chart-card">
-          <h2>Click Timing (slot countdown)</h2>
-          <canvas id="countdownChart"></canvas>
-        </div>
+      <div class="chart-card" style="margin-top:1.5rem; overflow-x:auto">
+        <h2>Ranked Features</h2>
+        <table style="width:100%; border-collapse:collapse; font-size:0.875rem">
+          <thead>
+            <tr style="text-align:left; color:var(--muted); border-bottom:1px solid #e4e4e7">
+              <th style="padding:0.5rem 0.5rem">#</th>
+              <th style="padding:0.5rem 0.5rem">Feature</th>
+              <th style="padding:0.5rem 0.5rem">Adoption</th>
+              <th style="padding:0.5rem 0.5rem">Corr. (freq.)</th>
+              <th style="padding:0.5rem 0.5rem">Uplift (sess/wk)</th>
+              <th style="padding:0.5rem 0.5rem">Corr. (repeat)</th>
+              <th style="padding:0.5rem 0.5rem">Uplift (repeat pp)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bqFc.features
+              .map(
+                (f) => `
+              <tr style="border-bottom:1px solid #f4f4f5">
+                <td style="padding:0.5rem 0.5rem">${f.rankByFrequencyCorrelation ?? '—'}</td>
+                <td style="padding:0.5rem 0.5rem">
+                  <div style="font-weight:600">${f.label}${
+                    f.lowSupport ? ' <span style="color:var(--muted); font-weight:400">· low support</span>' : ''
+                  }</div>
+                  <div style="color:var(--muted); font-size:0.75rem">${f.key}</div>
+                </td>
+                <td style="padding:0.5rem 0.5rem">${(f.adoption.adoptionRate * 100).toFixed(1)}% (${f.adoption.withFeature}/${f.adoption.withFeature + f.adoption.withoutFeature})</td>
+                <td style="padding:0.5rem 0.5rem">${f.bookingFrequency.correlation.toFixed(3)}</td>
+                <td style="padding:0.5rem 0.5rem">${f.bookingFrequency.uplift.toFixed(3)}</td>
+                <td style="padding:0.5rem 0.5rem">${f.repeatSessionRate.correlation.toFixed(3)}</td>
+                <td style="padding:0.5rem 0.5rem">${(f.repeatSessionRate.uplift * 100).toFixed(1)}</td>
+              </tr>`,
+              )
+              .join('')}
+          </tbody>
+        </table>
       </div>
     </div>
+
+    <!-- BQ15: Homepage Load Time Performance -->
+    <div class="section">
+      <h1 class="section-title">Homepage Load Time Performance (BQ15)</h1>
+      <p style="color:var(--muted); margin-top:-0.75rem; margin-bottom:1.25rem; max-width:70ch">
+        Does the average homepage load time exceed the <strong>2-second</strong> threshold?
+        Based on <strong>${bq15.totalSessions}</strong> measured sessions.
+      </p>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${bq15.totalSessions}</div>
+          <div class="stat-label">Sessions Measured</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:${bq15.avgLoadTimeMs > 2000 ? 'var(--crash)' : 'var(--instant)'}">
+            ${bq15.avgLoadTimeMs} ms
+          </div>
+          <div class="stat-label">Avg Load Time</div>
+          <div style="font-size:0.8rem;margin-top:0.4rem;opacity:0.75">
+            ${bq15.avgLoadTimeMs <= 2000 ? 'Within 2 s threshold' : 'Exceeds 2 s threshold'}
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:${bq15.failurePercentage > 20 ? 'var(--crash)' : bq15.failurePercentage > 10 ? 'var(--bug)' : 'var(--instant)'}">
+            ${bq15.failurePercentage}%
+          </div>
+          <div class="stat-label">Sessions &gt; 2 s</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--crash)">${bq15.failureCount}</div>
+          <div class="stat-label">Slow Load Events</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>Load Time — Within vs Exceeds 2 s Threshold</h2>
+        <canvas id="bq15Chart"></canvas>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -645,7 +917,7 @@ export class AnalyticsController {
     const dates = ${JSON.stringify(metrics.dates)};
     const bq5Dates = ${JSON.stringify(bq5.dates)};
     const instantByDay = ${JSON.stringify(bq5.instantByDay)};
-    const manualByDay = ${JSON.stringify(bq5.manualByDay)};
+    const failedByDay = ${JSON.stringify(bq5.failedByDay)};
     const crashes = ${JSON.stringify(metrics.crashes)};
     const bugs = ${JSON.stringify(metrics.bugs)};
     const latencyIssues = ${JSON.stringify(metrics.latencyIssues)};
@@ -717,8 +989,8 @@ export class AnalyticsController {
             borderRadius: 4,
           },
           {
-            label: 'Manual / Other',
-            data: manualByDay,
+            label: 'Failed / Other',
+            data: failedByDay,
             backgroundColor: 'rgba(107, 114, 128, 0.4)',
             borderColor: '#6b7280',
             borderWidth: 1,
@@ -739,6 +1011,26 @@ export class AnalyticsController {
         }
       }
     });
+    // BQ10: Booking source pie chart
+    new Chart(document.getElementById('bookingSourceChart'), {
+      type: 'bar',
+      data: {
+        labels: ['Carousel', 'Search / Other'],
+        datasets: [{
+          data: [${bq10.carouselBookings}, ${bq10.otherBookings}],
+          backgroundColor: ['rgba(16,185,129,0.8)', 'rgba(107,114,128,0.4)'],
+          borderColor: ['#10b981', '#6b7280'],
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        ...chartOptions,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Sessions' } } }
+      }
+    });
+
     // BQ2: Carousel funnel
     const bq2Dates = ${JSON.stringify(bq2.dates)};
     const bq2Impressions = ${JSON.stringify(bq2.impressions)};
@@ -760,22 +1052,108 @@ export class AnalyticsController {
       options: { ...chartOptions, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Events' } } } }
     });
 
-    new Chart(document.getElementById('topTutorsChart'), {
+
+
+    // BQ-FC: Student feature correlation
+    const bqFcRanked = ${JSON.stringify(
+      bqFcRanked.map((f) => ({
+        key: f.key,
+        label: f.label,
+        corrFreq: f.bookingFrequency.correlation,
+        corrRepeat: f.repeatSessionRate.correlation,
+        trend: f.trend,
+      })),
+    )};
+
+    const corrColor = (v) => v >= 0 ? 'rgba(16,185,129,0.8)' : 'rgba(239,68,68,0.8)';
+    const corrBorder = (v) => v >= 0 ? '#10b981' : '#ef4444';
+
+    new Chart(document.getElementById('bqFcFreqChart'), {
       type: 'bar',
       data: {
-        labels: topTutors.map(t => t.tutorId.slice(0, 8) + '…'),
-        datasets: [{ label: 'Clicks', data: topTutors.map(t => t.clicks), backgroundColor: 'rgba(245,158,11,0.8)', borderColor: '#f59e0b', borderWidth: 1, borderRadius: 4 }]
+        labels: bqFcRanked.map(f => f.label),
+        datasets: [{
+          label: 'Correlation',
+          data: bqFcRanked.map(f => f.corrFreq),
+          backgroundColor: bqFcRanked.map(f => corrColor(f.corrFreq)),
+          borderColor: bqFcRanked.map(f => corrBorder(f.corrFreq)),
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
       },
-      options: { ...chartOptions, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Clicks' } } } }
+      options: {
+        ...chartOptions,
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { min: -1, max: 1, title: { display: true, text: 'Point-biserial correlation' } } }
+      }
     });
 
-    new Chart(document.getElementById('countdownChart'), {
+    new Chart(document.getElementById('bqFcRepeatChart'), {
       type: 'bar',
       data: {
-        labels: countdownBuckets.map(b => b.label),
-        datasets: [{ label: 'Clicks', data: countdownBuckets.map(b => b.count), backgroundColor: 'rgba(59,130,246,0.8)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 4 }]
+        labels: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => f.label),
+        datasets: [{
+          label: 'Correlation',
+          data: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => f.corrRepeat),
+          backgroundColor: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => corrColor(f.corrRepeat)),
+          borderColor: [...bqFcRanked].sort((a,b)=>Math.abs(b.corrRepeat)-Math.abs(a.corrRepeat)).map(f => corrBorder(f.corrRepeat)),
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
       },
-      options: { ...chartOptions, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Clicks' } } } }
+      options: {
+        ...chartOptions,
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { min: -1, max: 1, title: { display: true, text: 'Point-biserial correlation' } } }
+      }
+    });
+
+    const topFeature = bqFcRanked[0];
+    if (topFeature && topFeature.trend && topFeature.trend.length > 0) {
+      new Chart(document.getElementById('bqFcTrendChart'), {
+        type: 'line',
+        data: {
+          labels: topFeature.trend.map(t => t.bucketStart.slice(0, 10)),
+          datasets: [{
+            label: topFeature.label + ' — uplift (sess/week)',
+            data: topFeature.trend.map(t => t.upliftFrequency),
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99,102,241,0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#6366f1',
+          }]
+        },
+        options: { ...chartOptions, scales: { y: { title: { display: true, text: 'Uplift (sessions/week)' } } } }
+      });
+    }
+
+    // BQ15: Homepage load time doughnut chart
+    const bq15PassPct = ${100 - bq15.failurePercentage};
+    const bq15FailPct = ${bq15.failurePercentage};
+    new Chart(document.getElementById('bq15Chart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Within 2 s (' + bq15PassPct.toFixed(1) + '%)', 'Exceeds 2 s (' + bq15FailPct.toFixed(1) + '%)'],
+        datasets: [{
+          data: [bq15PassPct, bq15FailPct],
+          backgroundColor: ['rgba(16,185,129,0.8)', 'rgba(239,68,68,0.8)'],
+          borderColor: ['#10b981', '#ef4444'],
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { position: 'bottom', labels: { usePointStyle: true, padding: 15 } },
+          tooltip: { callbacks: { label: (ctx) => ctx.label } }
+        }
+      }
     });
   </script>
 </body>

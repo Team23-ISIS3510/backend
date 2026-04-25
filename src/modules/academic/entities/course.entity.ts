@@ -36,4 +36,5 @@ export class Course {
   prerequisites?: string[];
   createdAt?: Date;
   updatedAt?: Date;
+  description?: string;
 }
