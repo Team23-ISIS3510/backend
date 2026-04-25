@@ -14,7 +14,7 @@ export interface SanitizedTutor {
   hourlyRate: number | null;
   bio: string;
   courses: string[];
-  profileImage: string | null;
+  profilePictureUrl: string | null;
   location?: string;
   totalSessions?: number;
   hasAvailability?: boolean;
@@ -59,7 +59,7 @@ export class TutorService {
           : null,
       bio: raw?.bio ?? '',
       courses: Array.isArray(raw?.courses) ? raw.courses : [],
-      profileImage: raw?.profileImage ?? null,
+      profilePictureUrl: raw?.profilePictureUrl ?? null,
       location: raw?.location ?? 'Virtual',
       ...extra,
     };

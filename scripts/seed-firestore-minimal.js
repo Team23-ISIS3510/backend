@@ -42,8 +42,7 @@ const minusMinutes = (m) => new Date(Date.now() - m * 60 * 1000);
 const IDS = {
   major: ['seed-major-sistemas', 'seed-major-matematicas'],
   course: ['seed-course-calculo', 'seed-course-poo'],
-  users: ['seed-tutor-001', 'seed-student-001'],
-  legacyUser: ['seed-student-legacy-001'],
+  users: ['seed-tutor-001', 'seed-student-001', 'seed-student-legacy-001'],
   availabilities: ['seed-avail-001'],
   tutoringSessions: ['seed-session-001'],
   slotBookings: ['seed-slot-001'],
@@ -54,6 +53,7 @@ const IDS = {
   tutorApplications: ['seed-app-001'],
   occupancy: ['seed-occupancy-001'],
   studentBookingContext: ['seed-sbc-001'],
+  telemetry: ['seed-telemetry-001'],
 };
 
 async function seed() {
@@ -130,8 +130,8 @@ async function seed() {
     updatedAt: createdAt,
   }, { merge: true });
 
-  // user (legacy/documented collection name)
-  batch.set(db.collection('user').doc(IDS.legacyUser[0]), {
+  // users (legacy shape in same real collection)
+  batch.set(db.collection('users').doc(IDS.users[2]), {
     name: 'Legacy User Seed',
     mail: 'legacy.seed@uniandes.edu.co',
     phone_number: '+57 3000000003',
@@ -293,6 +293,22 @@ async function seed() {
     instantAtCreate: true,
   }, { merge: true });
 
+  // backend-only: telemetry_bq15
+  batch.set(db.collection('telemetry_bq15').doc(IDS.telemetry[0]), {
+    eventName: 'seed_motion_alert_test',
+    actorId: IDS.users[1],
+    actorRole: 'student',
+    source: 'seed-script',
+    platform: 'backend-script',
+    metadata: {
+      sessionId: IDS.tutoringSessions[0],
+      availabilityId: IDS.availabilities[0],
+      courseId: IDS.course[0],
+    },
+    createdAt,
+    updatedAt: createdAt,
+  }, { merge: true });
+
   await batch.commit();
   console.log('Done. Minimal dataset created for all detected collections.');
 }
@@ -303,7 +319,6 @@ async function clean() {
     ['major', IDS.major],
     ['course', IDS.course],
     ['users', IDS.users],
-    ['user', IDS.legacyUser],
     ['availabilities', IDS.availabilities],
     ['tutoring_sessions', IDS.tutoringSessions],
     ['slot_bookings', IDS.slotBookings],
@@ -314,6 +329,7 @@ async function clean() {
     ['tutorApplications', IDS.tutorApplications],
     ['occupancy', IDS.occupancy],
     ['student_booking_context', IDS.studentBookingContext],
+    ['telemetry_bq15', IDS.telemetry],
   ];
 
   const batch = db.batch();
