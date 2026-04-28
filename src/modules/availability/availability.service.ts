@@ -21,6 +21,14 @@ export class AvailabilityService {
     private readonly userService: UserService,
   ) {}
 
+  /**
+   * Check if an ID is a local temporary ID (from frontend)
+   * Local IDs typically start with "local-" and are used for optimistic updates
+   */
+  private isLocalId(id: string): boolean {
+    return id.startsWith('local-') || id.includes('local-');
+  }
+
   private async resolveTutorIdentifiers(tutorId: string): Promise<string[]> {
     const normalized = tutorId.trim();
     if (!normalized) {
@@ -207,6 +215,10 @@ export class AvailabilityService {
         throw new Error('Invalid date format. Use YYYY-MM-DD');
       }
 
+      // NOTE: Multiple availabilities CAN be created at the same time and date
+      // This allows tutors to have multiple concurrent time slots available
+      // Example: Two 1-hour sessions at the same time (different participants)
+
       // Create availability object
       const availabilityData: Partial<Availability> = {
         tutorId,
@@ -223,7 +235,9 @@ export class AvailabilityService {
 
       // Save to Firebase (without googleEventId for now)
       const id = await this.availabilityRepository.save(undefined, availabilityData);
-      this.logger.log(`Availability created: ${id}`);
+      this.logger.log(
+        `Availability created: ${id} | Tutor: ${tutorId} | ${date} ${startTime}-${endTime} | "${title}"`,
+      );
 
       // Fetch and return the created availability
       const created = await this.availabilityRepository.findById(id);
@@ -240,6 +254,16 @@ export class AvailabilityService {
 
   async deleteAvailability(availabilityId: string): Promise<void> {
     try {
+      // Check if this is a local temporary ID
+      if (this.isLocalId(availabilityId)) {
+        this.logger.warn(
+          `Attempted to delete local availability (${availabilityId}). This is a client-side temporary ID.`,
+        );
+        // Don't throw error for local IDs - just log and return
+        // This allows the frontend to cleanup optimistic updates gracefully
+        return;
+      }
+
       const existing = await this.availabilityRepository.findById(availabilityId);
       if (!existing) {
         throw new NotFoundException(`Availability with ID ${availabilityId} not found`);
@@ -279,6 +303,13 @@ export class AvailabilityService {
     updateData: any,
   ): Promise<AvailabilityResponseDto> {
     try {
+      // Check if this is a local temporary ID
+      if (this.isLocalId(availabilityId)) {
+        throw new Error(
+          `Cannot update local availability (${availabilityId}). Create it first in the server and use the returned ID.`,
+        );
+      }
+
       // Get current availability
       const current = await this.availabilityRepository.findById(availabilityId);
       if (!current) {
