@@ -9,6 +9,7 @@ import {
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import { FirebaseService } from '../firebase/firebase.service';
 import { UserService } from '../user/user.service';
 import { RegisterDto } from './dto/register.dto';
@@ -21,20 +22,73 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly identityUrl = 'https://identitytoolkit.googleapis.com/v1/accounts';
-
+  private googleClient: OAuth2Client;
 
   constructor(
     private readonly firebase: FirebaseService,
     private readonly userService: UserService,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.googleClient = new OAuth2Client(
+      this.configService.get<string>('GOOGLE_CLIENT_ID_ANDROID'),
+    );
+  }
 
   async verifyToken(token: string): Promise<DecodedIdToken> {
     try {
       return await this.firebase.getAuth().verifyIdToken(token, true);
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
+    }
+  }
+
+  /**
+   * Verifica un Google OAuth ID Token usando OAuth2Client
+   * Acepta tokens generados con GOOGLE_CLIENT_ID_ANDROID o GOOGLE_CLIENT_ID
+   */
+  async verifyGoogleIdToken(idToken: string): Promise<TokenPayload> {
+    try {
+      const clientIdAndroid = this.configService.get<string>('GOOGLE_CLIENT_ID_ANDROID');
+      const clientIdWeb = this.configService.get<string>('GOOGLE_CLIENT_ID');
+      
+      if (!clientIdAndroid && !clientIdWeb) {
+        throw new InternalServerErrorException(
+          'Missing Google OAuth configuration (GOOGLE_CLIENT_ID_ANDROID or GOOGLE_CLIENT_ID)',
+        );
+      }
+
+      // Build list of valid audiences - filter out undefined values
+      const validAudiences: string[] = [];
+      if (clientIdAndroid) validAudiences.push(clientIdAndroid);
+      if (clientIdWeb) validAudiences.push(clientIdWeb);
+
+      try {
+        // Try with the list of valid audiences
+        const ticket = await this.googleClient.verifyIdToken({
+          idToken,
+          audience: validAudiences.length === 1 ? validAudiences[0] : validAudiences,
+        });
+
+        const payload = ticket.getPayload();
+        if (!payload) {
+          throw new UnauthorizedException('Invalid token payload');
+        }
+
+        return payload;
+      } catch (verifyError: any) {
+        // Log the specific verification error for debugging
+        this.logger.error('Token verification error', {
+          message: verifyError?.message,
+          audiences: validAudiences,
+        });
+        throw verifyError;
+      }
+    } catch (error: any) {
+      this.logger.error('Google token verification failed', error?.message);
+      throw new UnauthorizedException(
+        'Invalid or expired Google token. ' + error?.message,
+      );
     }
   }
 
@@ -179,28 +233,44 @@ export class AuthService {
   }
 
   async googleSignIn(idToken: string): Promise<AuthResponseDto> {
-    // Verify the token and get user data
-    const decoded = await this.verifyToken(idToken);
-    const existingUser = await this.userService.findByIdOrNull(decoded.uid);
-    
+    // 1. Verify the Google OAuth ID Token
+    const payload = await this.verifyGoogleIdToken(idToken);
+
+    // 2. Extract user data from the payload
+    const email = payload.email;
+    const name = payload.name || payload.email || 'User'; // Ensure name is always set
+    const googleId = payload.sub; // Google's unique user ID - use as UID
+
+    if (!email || !googleId) {
+      throw new UnauthorizedException(
+        'Google token does not include required fields (email, sub)',
+      );
+    }
+
+    // 3. Find or create user in Firestore using email
+    let existingUser: UserResponseDto | null = null;
+    try {
+      existingUser = await this.userService.getUserByEmail(email);
+    } catch {
+      // User doesn't exist, we'll create it
+      existingUser = null;
+    }
+
     if (!existingUser) {
       // Auto-register if user doesn't exist
-      const email = decoded.email;
-      if (!email) {
-        throw new UnauthorizedException('Authenticated token does not include an email');
-      }
-
-      await this.userService.create(decoded.uid, {
+      this.logger.debug(`Creating new user from Google OAuth: ${email}`);
+      existingUser = await this.userService.create(googleId, {
         email,
-        name: decoded.name ?? email,
+        name,
         phone: '',
         isTutor: false,
       });
     }
 
-    // Generate tokens for the frontend
-    const customToken = await this.firebase.getAuth().createCustomToken(decoded.uid);
-    
+    // 4. Generate Firebase custom token for session
+    const customToken = await this.firebase.getAuth().createCustomToken(googleId);
+
+    // Return authentication response
     return {
       idToken: customToken,
       refreshToken: idToken,
