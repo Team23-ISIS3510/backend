@@ -4,6 +4,8 @@ import { FirebaseService } from '../firebase/firebase.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
 import { AcademicService } from '../academic/academic.service';
 import { Course } from '../academic/entities/course.entity';
+import { TutoringSessionRepository } from '../tutoring-session/tutoring-session.repository';
+import { HotSlotsAnalysisResponseDto, HotSlotDto } from './tutor-application.types';
 
 export interface SanitizedTutor {
   id: string;
@@ -31,6 +33,7 @@ export class TutorService {
     private readonly firebaseService: FirebaseService,
     private readonly availabilityRepository: AvailabilityRepository,
     private readonly academicService: AcademicService,
+    private readonly tutoringSessionRepository: TutoringSessionRepository,
   ) {}
 
   /**
@@ -693,5 +696,133 @@ export class TutorService {
       this.logger.error(`Error rejecting application ${applicationId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Analyze hot slots for a tutor - top 3 most booked 1-hour slots in the last week
+   * Returns availability status for each hot slot
+   */
+  async analyzeHotSlots(tutorId: string): Promise<HotSlotsAnalysisResponseDto> {
+    try {
+      this.logger.log(`Analyzing hot slots for tutor: ${tutorId}`);
+
+      // Get tutor to verify it exists
+      const tutor = await this.getTutorById(tutorId);
+      if (!tutor) {
+        throw new NotFoundException(`Tutor ${tutorId} not found`);
+      }
+
+      // Calculate time range: last 7 days
+      const now = new Date();
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      // Get all tutoring sessions for this tutor in the last week
+      const db = this.firebaseService.getFirestore();
+      const sessionsSnapshot = await db
+        .collection('tutoringSession')
+        .where('tutorId', '==', tutor.id)
+        .where('scheduledStart', '>=', sevenDaysAgo)
+        .where('scheduledStart', '<=', now)
+        .get();
+
+      const sessions = sessionsSnapshot.docs
+        .map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+        .filter((session: any) => {
+          // Only count scheduled or completed sessions
+          return ['scheduled', 'completed'].includes(session.status);
+        });
+
+      this.logger.log(`Found ${sessions.length} sessions for tutor ${tutor.id} in last week`);
+
+      // Group sessions by 1-hour slots
+      const slotMap = new Map<string, number>();
+
+      sessions.forEach((session: any) => {
+        const startDate = new Date(session.scheduledStart);
+        const hour = startDate.getHours();
+        const dayOfWeek = startDate.getDay();
+
+        // Create a slot key: day_of_week:hour (e.g., "1:14" for Monday 2 PM)
+        const slotKey = `${dayOfWeek}:${hour}`;
+        slotMap.set(slotKey, (slotMap.get(slotKey) || 0) + 1);
+      });
+
+      // Sort slots by booking count and get top 3
+      const topSlots = Array.from(slotMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([slotKey, count]) => ({ slotKey, count }));
+
+      // Get tutor's availability
+      const tutorAvailability = await this.availabilityRepository.findByTutor(tutor.id, 1000);
+
+      // Create response DTOs for each hot slot
+      const hotSlots: HotSlotDto[] = topSlots.map((slot) => {
+        const [dayOfWeek, hour] = slot.slotKey.split(':').map(Number);
+
+        // Create a representative date for this slot (find next occurrence of this day/hour)
+        const nextSlotDate = this.getNextOccurrenceOfDayHour(dayOfWeek, hour);
+        const slotStart = new Date(nextSlotDate);
+        const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000); // 1 hour slot
+
+        // Check if tutor has availability during this slot
+        const availabilityInSlot = tutorAvailability.find(
+          (avail) => {
+            const availStart = new Date(avail.startDateTime);
+            const availEnd = new Date(avail.endDateTime);
+            return availStart <= slotStart && slotEnd <= availEnd;
+          },
+        );
+
+        const hotSlot: HotSlotDto = {
+          slotStart,
+          slotEnd,
+          bookingCount: slot.count,
+          tutorAvailability: availabilityInSlot ? 'available' : 'not_available',
+        };
+
+        if (availabilityInSlot) {
+          hotSlot.availabilityStart = new Date(availabilityInSlot.startDateTime);
+          hotSlot.availabilityEnd = new Date(availabilityInSlot.endDateTime);
+        }
+
+        return hotSlot;
+      });
+
+      const response: HotSlotsAnalysisResponseDto = {
+        tutorId: tutor.id,
+        analysisStartDate: sevenDaysAgo,
+        analysisEndDate: now,
+        totalSessionsLastWeek: sessions.length,
+        hotSlots,
+      };
+
+      this.logger.log(`Hot slots analysis completed for tutor ${tutor.id}: ${hotSlots.length} slots found`);
+      return response;
+    } catch (error) {
+      this.logger.error(`Error analyzing hot slots for tutor ${tutorId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Helper method to get the next occurrence of a specific day of week and hour
+   */
+  private getNextOccurrenceOfDayHour(targetDayOfWeek: number, targetHour: number): Date {
+    const now = new Date();
+    const currentDate = new Date(now);
+    currentDate.setHours(targetHour, 0, 0, 0);
+
+    const daysUntilTarget = (targetDayOfWeek - currentDate.getDay() + 7) % 7;
+    if (daysUntilTarget === 0 && currentDate < now) {
+      currentDate.setDate(currentDate.getDate() + 7);
+    } else {
+      currentDate.setDate(currentDate.getDate() + daysUntilTarget);
+    }
+
+    return currentDate;
   }
 }

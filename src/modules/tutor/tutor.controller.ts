@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { TutorService } from './tutor.service';
-import { TutorApplicationDto, TutorApplicationResponseDto } from './tutor-application.types';
+import { TutorApplicationDto, TutorApplicationResponseDto, HotSlotsAnalysisResponseDto } from './tutor-application.types';
 
 @ApiTags('Tutors')
 @Controller('tutors')
@@ -117,5 +117,23 @@ export class TutorController {
       rejectionReason,
       reviewedBy,
     );
+  }
+
+  @ApiOperation({
+    summary: 'Get hot slots analysis',
+    description:
+      'Analyzes tutoring sessions from the last 7 days and identifies the top 3 most booked 1-hour slots. ' +
+      'For each slot, returns whether the tutor is available or not during that time.',
+  })
+  @ApiParam({ name: 'tutorId', description: 'Tutor Firebase UID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Hot slots analysis with availability info.',
+    type: HotSlotsAnalysisResponseDto,
+  })
+  @ApiResponse({ status: 404, description: 'Tutor not found.' })
+  @Get(':tutorId/hot-slots')
+  async getHotSlotsAnalysis(@Param('tutorId') tutorId: string) {
+    return this.tutorService.analyzeHotSlots(tutorId);
   }
 }
