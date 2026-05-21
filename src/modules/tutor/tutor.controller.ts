@@ -1,7 +1,14 @@
-import { Controller, Get, Post, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { TutorService } from './tutor.service';
-import { TutorApplicationDto, TutorApplicationResponseDto, HotSlotsAnalysisResponseDto } from './tutor-application.types';
+import {
+  HotSlotsAnalysisResponseDto,
+  TutorApplicationDto,
+  TutorApplicationResponseDto,
+  TutorCourseNoteResponseDto,
+  TutorCourseWithNotesDto,
+  UpdateTutorCourseNoteDto,
+} from './tutor-application.types';
 
 @ApiTags('Tutors')
 @Controller('tutors')
@@ -38,11 +45,37 @@ export class TutorController {
     description: 'Returns the list of courses that the tutor is allowed to teach.',
   })
   @ApiParam({ name: 'tutorId', description: 'Tutor Firebase UID' })
-  @ApiResponse({ status: 200, description: 'List of courses.' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of courses with tutor notes.',
+    type: [TutorCourseWithNotesDto],
+  })
   @ApiResponse({ status: 404, description: 'Tutor not found.' })
   @Get(':tutorId/courses')
   async getTutorCourses(@Param('tutorId') tutorId: string) {
     return this.tutorService.getTutorCourses(tutorId);
+  }
+
+  @ApiOperation({
+    summary: 'Update tutor course note',
+    description: 'Create or update a private note for one of the tutor’s allowed courses.',
+  })
+  @ApiParam({ name: 'tutorId', description: 'Tutor Firebase UID' })
+  @ApiParam({ name: 'courseId', description: 'Course ID' })
+  @ApiBody({ type: UpdateTutorCourseNoteDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Course note saved.',
+    type: TutorCourseNoteResponseDto,
+  })
+  @ApiResponse({ status: 404, description: 'Tutor or course not found.' })
+  @Put(':tutorId/courses/:courseId/note')
+  async updateTutorCourseNote(
+    @Param('tutorId') tutorId: string,
+    @Param('courseId') courseId: string,
+    @Body() dto: UpdateTutorCourseNoteDto,
+  ) {
+    return this.tutorService.updateTutorCourseNote(tutorId, courseId, dto.note);
   }
 
   @ApiOperation({

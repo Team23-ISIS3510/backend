@@ -1,11 +1,15 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { FirebaseService } from '../firebase/firebase.service';
 import { AvailabilityRepository } from '../availability/availability.repository';
 import { AcademicService } from '../academic/academic.service';
-import { Course } from '../academic/entities/course.entity';
 import { TutoringSessionRepository } from '../tutoring-session/tutoring-session.repository';
-import { HotSlotsAnalysisResponseDto, HotSlotDto } from './tutor-application.types';
+import {
+  HotSlotsAnalysisResponseDto,
+  HotSlotDto,
+  TutorCourseNoteResponseDto,
+  TutorCourseWithNotesDto,
+} from './tutor-application.types';
 
 export interface SanitizedTutor {
   id: string;
@@ -66,6 +70,37 @@ export class TutorService {
       location: raw?.location ?? 'Virtual',
       ...extra,
     };
+  }
+
+  private async resolveTutorUserDoc(tutorId: string) {
+    const db = this.firebaseService.getFirestore();
+    let userDoc = await db.collection('users').doc(tutorId).get();
+
+    if (!userDoc.exists && tutorId.includes('@')) {
+      const emailQuery = await db
+        .collection('users')
+        .where('email', '==', tutorId)
+        .where('isTutor', '==', true)
+        .limit(1)
+        .get();
+
+      if (!emailQuery.empty) {
+        userDoc = emailQuery.docs[0];
+      }
+    }
+
+    if (!userDoc.exists) {
+      this.logger.warn(`Tutor ${tutorId} not found`);
+      throw new NotFoundException(`Tutor ${tutorId} not found`);
+    }
+
+    const userData = userDoc.data();
+    if (!userData?.isTutor) {
+      this.logger.warn(`User ${tutorId} is not a tutor`);
+      throw new NotFoundException(`User ${tutorId} is not a tutor`);
+    }
+
+    return { userDoc, userData };
   }
 
   /**
@@ -374,54 +409,84 @@ export class TutorService {
    * Get courses for a tutor
    * Returns the full course objects that the tutor is allowed to teach
    */
-  async getTutorCourses(tutorId: string): Promise<Course[]> {
+  async getTutorCourses(tutorId: string): Promise<TutorCourseWithNotesDto[]> {
     try {
       this.logger.log(`Fetching courses for tutor: ${tutorId}`);
-      const db = this.firebaseService.getFirestore();
-
-      // Try by document ID first
-      let userDoc = await db.collection('users').doc(tutorId).get();
-
-      // If not found by document ID and it looks like an email, try by email field
-      if (!userDoc.exists && tutorId.includes('@')) {
-        const emailQuery = await db
-          .collection('users')
-          .where('email', '==', tutorId)
-          .where('isTutor', '==', true)
-          .limit(1)
-          .get();
-
-        if (!emailQuery.empty) {
-          userDoc = emailQuery.docs[0];
-        }
-      }
-
-      if (!userDoc.exists) {
-        this.logger.warn(`Tutor ${tutorId} not found`);
-        throw new NotFoundException(`Tutor ${tutorId} not found`);
-      }
-
-      const userData = userDoc.data();
-      if (!userData?.isTutor) {
-        this.logger.warn(`User ${tutorId} is not a tutor`);
-        throw new NotFoundException(`User ${tutorId} is not a tutor`);
-      }
-
+      const { userData } = await this.resolveTutorUserDoc(tutorId);
       const courseIds = Array.isArray(userData?.courses) ? userData.courses : [];
+      const courseNotes =
+        userData?.courseNotes &&
+        typeof userData.courseNotes === 'object' &&
+        !Array.isArray(userData.courseNotes)
+          ? (userData.courseNotes as Record<string, unknown>)
+          : {};
       this.logger.log(`Found ${courseIds.length} course IDs for tutor ${tutorId}: ${courseIds.join(', ')}`);
 
       // Fetch full course objects for each course ID
-      const courses: Course[] = [];
+      const courses: TutorCourseWithNotesDto[] = [];
       for (const courseId of courseIds) {
         try {
           const course = await this.academicService.getCourseById(courseId);
           if (course) {
-            courses.push(course);
+            const note =
+              typeof courseNotes[courseId] === 'string'
+                ? (courseNotes[courseId] as string)
+                : undefined;
+            courses.push({ ...course, note });
           } else {
             this.logger.warn(`Course ${courseId} not found for tutor ${tutorId}`);
           }
         } catch (courseError) {
           this.logger.warn(`Error fetching course ${courseId}:`, courseError);
+        }
+      }
+
+      /**
+       * Update tutor note for an allowed course
+       */
+      async updateTutorCourseNote(
+        tutorId: string,
+        courseId: string,
+        note: string,
+      ): Promise<TutorCourseNoteResponseDto> {
+        try {
+          this.logger.log(`Updating course note for tutor ${tutorId}, course ${courseId}`);
+
+          const { userDoc, userData } = await this.resolveTutorUserDoc(tutorId);
+          const courseIds = Array.isArray(userData?.courses) ? userData.courses : [];
+
+          if (!courseIds.includes(courseId)) {
+            throw new NotFoundException(
+              `Course ${courseId} is not in tutor ${tutorId}'s allowed courses`,
+            );
+          }
+
+          const course = await this.academicService.getCourseById(courseId);
+          if (!course) {
+            throw new NotFoundException(`Course ${courseId} not found`);
+          }
+
+          const trimmedNote = note.trim();
+          if (!trimmedNote) {
+            throw new BadRequestException('Note cannot be empty');
+          }
+
+          await userDoc.ref.update({
+            [`courseNotes.${courseId}`]: trimmedNote,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          return {
+            tutorId: userDoc.id,
+            courseId,
+            note: trimmedNote,
+          };
+        } catch (error) {
+          this.logger.error(
+            `Error updating course note for tutor ${tutorId} and course ${courseId}:`,
+            error,
+          );
+          throw error;
         }
       }
 

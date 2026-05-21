@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class TutorApplicationDto {
   @ApiProperty({ example: 'tutor-123', description: 'Tutor ID' })
@@ -138,4 +139,37 @@ export class HotSlotsAnalysisResponseDto {
     description: 'Top 3 most booked 1-hour slots with tutor availability info',
   })
   hotSlots: HotSlotDto[];
+}
+
+export class TutorCourseWithNotesDto extends Course {
+  @ApiProperty({
+    example: 'Focus on recursion and dynamic programming explanations',
+    description: 'Private note for the tutor about this course',
+    required: false,
+  })
+  note?: string;
+}
+
+export class UpdateTutorCourseNoteDto {
+  @ApiProperty({
+    example: 'Focus on recursion and dynamic programming explanations',
+    description: 'Private note for the tutor about this course',
+  })
+  @IsString()
+  @IsNotEmpty()
+  note: string;
+}
+
+export class TutorCourseNoteResponseDto {
+  @ApiProperty({ example: 'tutor-123', description: 'Tutor ID' })
+  tutorId: string;
+
+  @ApiProperty({ example: 'course-456', description: 'Course ID' })
+  courseId: string;
+
+  @ApiProperty({
+    example: 'Focus on recursion and dynamic programming explanations',
+    description: 'Private note for the tutor about this course',
+  })
+  note: string;
 }
