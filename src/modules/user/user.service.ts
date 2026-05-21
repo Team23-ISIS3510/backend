@@ -44,4 +44,9 @@ export class UserService {
     if (!user) throw new NotFoundException('User not found');
     await this.userRepository.delete(id);
   }
+
+  async getAllTutors(): Promise<UserResponseDto[]> {
+    const tutors = await this.userRepository.findAllTutors();
+    return tutors.map(tutor => UserResponseDto.fromEntity(tutor));
+  }
 }
