@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsString } from 'class-validator';
+import { Course } from '../academic/entities/course.entity';
 
 export class TutorApplicationDto {
   @ApiProperty({ example: 'tutor-123', description: 'Tutor ID' })
