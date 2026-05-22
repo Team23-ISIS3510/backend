@@ -441,59 +441,60 @@ export class TutorService {
         }
       }
 
-      /**
-       * Update tutor note for an allowed course
-       */
-      async updateTutorCourseNote(
-        tutorId: string,
-        courseId: string,
-        note: string,
-      ): Promise<TutorCourseNoteResponseDto> {
-        try {
-          this.logger.log(`Updating course note for tutor ${tutorId}, course ${courseId}`);
-
-          const { userDoc, userData } = await this.resolveTutorUserDoc(tutorId);
-          const courseIds = Array.isArray(userData?.courses) ? userData.courses : [];
-
-          if (!courseIds.includes(courseId)) {
-            throw new NotFoundException(
-              `Course ${courseId} is not in tutor ${tutorId}'s allowed courses`,
-            );
-          }
-
-          const course = await this.academicService.getCourseById(courseId);
-          if (!course) {
-            throw new NotFoundException(`Course ${courseId} not found`);
-          }
-
-          const trimmedNote = note.trim();
-          if (!trimmedNote) {
-            throw new BadRequestException('Note cannot be empty');
-          }
-
-          await userDoc.ref.update({
-            [`courseNotes.${courseId}`]: trimmedNote,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-
-          return {
-            tutorId: userDoc.id,
-            courseId,
-            note: trimmedNote,
-          };
-        } catch (error) {
-          this.logger.error(
-            `Error updating course note for tutor ${tutorId} and course ${courseId}:`,
-            error,
-          );
-          throw error;
-        }
-      }
-
       this.logger.log(`Returning ${courses.length} courses for tutor ${tutorId}`);
       return courses;
     } catch (error) {
       this.logger.error(`Error fetching courses for tutor ${tutorId}:`, error);
+      throw error;
+    }
+
+  }
+
+  /**
+   * Update tutor note for an allowed course
+   */
+  async updateTutorCourseNote(
+    tutorId: string,
+    courseId: string,
+    note: string,
+  ): Promise<TutorCourseNoteResponseDto> {
+    try {
+      this.logger.log(`Updating course note for tutor ${tutorId}, course ${courseId}`);
+
+      const { userDoc, userData } = await this.resolveTutorUserDoc(tutorId);
+      const courseIds = Array.isArray(userData?.courses) ? userData.courses : [];
+
+      if (!courseIds.includes(courseId)) {
+        throw new NotFoundException(
+          `Course ${courseId} is not in tutor ${tutorId}'s allowed courses`,
+        );
+      }
+
+      const course = await this.academicService.getCourseById(courseId);
+      if (!course) {
+        throw new NotFoundException(`Course ${courseId} not found`);
+      }
+
+      const trimmedNote = note.trim();
+      if (!trimmedNote) {
+        throw new BadRequestException('Note cannot be empty');
+      }
+
+      await userDoc.ref.update({
+        [`courseNotes.${courseId}`]: trimmedNote,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      return {
+        tutorId: userDoc.id,
+        courseId,
+        note: trimmedNote,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error updating course note for tutor ${tutorId} and course ${courseId}:`,
+        error,
+      );
       throw error;
     }
   }
