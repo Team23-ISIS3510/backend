@@ -484,6 +484,54 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ11: GET /analytics/peak-session-hours
+   *
+   * Returns the top N weekly time blocks (weekday + hour) by session volume.
+   */
+  @Get('peak-session-hours')
+  @ApiOperation({
+    summary: 'BQ11: Peak tutoring session hours (weekly)',
+    description:
+      'Aggregates scheduled tutoring sessions by weekday and hour, returning the top N time blocks and a heatmap-ready dataset.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Number of top time blocks to return (default 5)',
+    type: Number,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Peak session hours analytics',
+    schema: {
+      example: {
+        success: true,
+        timezone: 'UTC',
+        totalSessions: 240,
+        topHours: [
+          { dayOfWeek: 2, hourOfDay: 10, count: 18 },
+          { dayOfWeek: 3, hourOfDay: 15, count: 17 },
+        ],
+        heatmap: [{ dayOfWeek: 0, hourOfDay: 0, count: 0 }],
+      },
+    },
+  })
+  async getPeakSessionHours(@Query('limit') limit?: string) {
+    const parsedLimit = limit !== undefined ? parseInt(limit, 10) : 5;
+    if (limit !== undefined && (isNaN(parsedLimit) || parsedLimit <= 0)) {
+      throw new BadRequestException('limit must be a positive integer');
+    }
+
+    try {
+      const data = await this.analyticsService.getPeakSessionHours(parsedLimit);
+      return { success: true, ...data };
+    } catch (error) {
+      this.logger.error('BQ11: Error fetching peak session hours:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ15: POST /analytics/homepage-load
    * Receives homepage load time telemetry from the mobile app (non-blocking fire-and-forget).
    */
@@ -568,13 +616,14 @@ export class AnalyticsController {
   ) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bq2, bq10, bqFc, bq15] = await Promise.all([
+    const [metrics, bq5, bq2, bq10, bqFc, bq15, bq11] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
       this.analyticsService.getBQ2DashboardData(),
       this.analyticsService.getBookingSourceStats(),
       this.featureCorrelationService.getStudentFeatureCorrelation(),
       this.analyticsService.getHomepageLoadMetrics(),
+      this.analyticsService.getPeakSessionHours(5),
     ]);
 
     // Fetch BQ16 with error handling
@@ -607,6 +656,25 @@ export class AnalyticsController {
         (a, b) =>
           Math.abs(b.bookingFrequency.correlation) - Math.abs(a.bookingFrequency.correlation),
       );
+
+    const bq11DayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const bq11Rows = bq11.topHours.length
+      ? bq11.topHours
+          .map((slot, index) => {
+            const dayLabel = bq11DayLabels[slot.dayOfWeek] ?? `Day ${slot.dayOfWeek}`;
+            const hourLabel = `${String(slot.hourOfDay).padStart(2, '0')}:00`;
+            return `
+              <tr style="border-bottom:1px solid #f4f4f5">
+                <td style="padding:0.5rem 0.5rem">${index + 1}</td>
+                <td style="padding:0.5rem 0.5rem; font-weight:600">${dayLabel} ${hourLabel}</td>
+                <td style="padding:0.5rem 0.5rem">${slot.count}</td>
+              </tr>`;
+          })
+          .join('')
+      : `
+          <tr>
+            <td style="padding:0.75rem 0.5rem; color:var(--muted)" colspan="3">No session data available.</td>
+          </tr>`;
 
     const html = `
 <!DOCTYPE html>
@@ -841,6 +909,30 @@ export class AnalyticsController {
       <div class="chart-card">
         <h2>Carousel vs Other Bookings</h2>
         <canvas id="bookingSourceChart"></canvas>
+      </div>
+    </div>
+
+    <!-- BQ11: Peak Campus Study Hours -->
+    <div class="section">
+      <h1 class="section-title">Peak Campus Study Hours (BQ11)</h1>
+      <p style="color:var(--muted); margin-top:-0.75rem; margin-bottom:1.25rem; max-width:70ch">
+        Top 5 weekly time blocks by scheduled session volume (timezone: ${bq11.timezone}).
+        Based on <strong>${bq11.totalSessions}</strong> sessions.
+      </p>
+
+      <div class="chart-card" style="overflow-x:auto">
+        <table style="width:100%; border-collapse:collapse; font-size:0.875rem">
+          <thead>
+            <tr style="text-align:left; color:var(--muted); border-bottom:1px solid #e4e4e7">
+              <th style="padding:0.5rem 0.5rem">#</th>
+              <th style="padding:0.5rem 0.5rem">Time Block</th>
+              <th style="padding:0.5rem 0.5rem">Sessions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bq11Rows}
+          </tbody>
+        </table>
       </div>
     </div>
 
