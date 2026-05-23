@@ -29,6 +29,12 @@ export interface ReturningTutorResult extends AvailableTutorResult {
   bookingCount: number;
 }
 
+export interface PeakSessionHour {
+  dayOfWeek: number;
+  hourOfDay: number;
+  count: number;
+}
+
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
@@ -1024,6 +1030,90 @@ export class AnalyticsService {
     );
 
     return { totalSessions, carouselBookings, otherBookings, carouselPercentage };
+  }
+
+  /**
+   * BQ11: Peak weekly tutoring session hours (aggregated by weekday + hour).
+   * Uses scheduled session timestamps and returns a Top N list plus full heatmap buckets.
+   */
+  async getPeakSessionHours(
+    limit: number = 5,
+  ): Promise<{
+    timezone: string;
+    totalSessions: number;
+    topHours: PeakSessionHour[];
+    heatmap: PeakSessionHour[];
+  }> {
+    const db = this.firebaseService.getFirestore();
+    const snapshot = await db.collection('tutoring_sessions').get();
+
+    const counts = new Map<string, number>();
+    let totalSessions = 0;
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const status = String(data.status ?? '').toLowerCase();
+      if (status === 'cancelled' || status === 'declined' || status === 'rejected') {
+        return;
+      }
+
+      const sessionTime =
+        this.safeToDate(data.scheduledStart) ??
+        this.safeToDate(data.scheduledDateTime) ??
+        this.safeToDate(data.startDateTime);
+
+      if (!sessionTime) {
+        return;
+      }
+
+      const dayOfWeek = sessionTime.getUTCDay();
+      const hourOfDay = sessionTime.getUTCHours();
+      const key = `${dayOfWeek}-${hourOfDay}`;
+
+      counts.set(key, (counts.get(key) || 0) + 1);
+      totalSessions++;
+    });
+
+    const resolvedLimit =
+      Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 5;
+
+    const topHours = [...counts.entries()]
+      .map(([key, count]) => {
+        const [dayStr, hourStr] = key.split('-');
+        return {
+          dayOfWeek: Number(dayStr),
+          hourOfDay: Number(hourStr),
+          count,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.count - a.count || a.dayOfWeek - b.dayOfWeek || a.hourOfDay - b.hourOfDay,
+      )
+      .slice(0, resolvedLimit);
+
+    const heatmap: PeakSessionHour[] = [];
+    for (let day = 0; day < 7; day++) {
+      for (let hour = 0; hour < 24; hour++) {
+        const key = `${day}-${hour}`;
+        heatmap.push({
+          dayOfWeek: day,
+          hourOfDay: hour,
+          count: counts.get(key) || 0,
+        });
+      }
+    }
+
+    this.logger.log(
+      `BQ11: Computed peak hours from ${totalSessions} sessions, top ${resolvedLimit}`,
+    );
+
+    return {
+      timezone: 'UTC',
+      totalSessions,
+      topHours,
+      heatmap,
+    };
   }
 
   /**
