@@ -4,10 +4,12 @@ import type { Request, Response } from 'express';
 import { AnalyticsService, AvailableTutorResult, ReturningTutorResult } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
 import { AnalyticsFeatureCorrelationService } from './analytics-feature-correlation.service';
+import { HistoryAnalyticsService } from './analytics-history.service';
 import { TutorOccupancyDto } from './dto/tutor-occupancy.dto';
 import { CreateBugReportDto } from './dto/bug-report.dto';
 import { CreateCarouselEventDto } from './dto/carousel-event.dto';
 import { LogHomepageLoadDto } from './dto/homepage-load.dto';
+import { CreateHistoryAnalyticsEventDto, BQ16HistoryAnalyticsResponseDto } from './dto/history-analytics.dto';
 import { UserService } from '../user/user.service';
 import { TutoringSessionService } from '../tutoring-session/tutoring-session.service';
 import { FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
@@ -58,9 +60,32 @@ export class AnalyticsController {
     private readonly analyticsService: AnalyticsService,
     private readonly analyticsBookingService: AnalyticsBookingService,
     private readonly featureCorrelationService: AnalyticsFeatureCorrelationService,
+    private readonly historyAnalyticsService: HistoryAnalyticsService,
     private readonly userService: UserService,
     private readonly sessionService: TutoringSessionService,
   ) {}
+
+  private normalizeBQ16DateRange(start: string, end: string): { weekStart: string; weekEnd: string } {
+    const weekStart = new Date(start);
+    const weekEnd = new Date(end);
+
+    if (Number.isNaN(weekStart.getTime()) || Number.isNaN(weekEnd.getTime())) {
+      throw new BadRequestException('Query parameters "start" and "end" must be valid dates');
+    }
+
+    if (!start.includes('T')) {
+      weekStart.setUTCHours(0, 0, 0, 0);
+    }
+
+    if (!end.includes('T')) {
+      weekEnd.setUTCHours(23, 59, 59, 999);
+    }
+
+    return {
+      weekStart: weekStart.toISOString(),
+      weekEnd: weekEnd.toISOString(),
+    };
+  }
 
   /**
    * GET /analytics/available-tutors?course=ISIS3710
@@ -582,7 +607,13 @@ export class AnalyticsController {
     description: 'Minimalist dashboard with 7-day trend visualization for crashes, bugs, and slow API requests (>2s)',
   })
   @ApiResponse({ status: 200, description: 'HTML dashboard page', content: { 'text/html': {} } })
-  async getDashboard(@Res() res: Response) {
+  @ApiQuery({ name: 'start', required: false, example: '2026-05-25' })
+  @ApiQuery({ name: 'end', required: false, example: '2026-05-31' })
+  async getDashboard(
+    @Res() res: Response,
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
     this.logger.log('BQ1: Generating dashboard');
     
     const [metrics, bq5, bq2, bq10, bqFc, bq15, bq11] = await Promise.all([
@@ -594,6 +625,29 @@ export class AnalyticsController {
       this.analyticsService.getHomepageLoadMetrics(),
       this.analyticsService.getPeakSessionHours(5),
     ]);
+
+    // Fetch BQ16 with error handling
+    let bq16: BQ16HistoryAnalyticsResponseDto = {
+      weeklyPercentage: 0,
+      totalEvents: 0,
+      uniqueTutorsUsing: 0,
+      totalActiveTutors: 0,
+      weekStart: new Date().toISOString(),
+      weekEnd: new Date().toISOString(),
+      eventsByDay: [],
+      topTutors: [],
+    };
+
+    try {
+      if (start && end) {
+        const { weekStart, weekEnd } = this.normalizeBQ16DateRange(start, end);
+        bq16 = await this.historyAnalyticsService.calculateBQ16Weekly(weekStart, weekEnd);
+      } else {
+        bq16 = await this.historyAnalyticsService.getCurrentWeekBQ16();
+      }
+    } catch (error) {
+      this.logger.warn('BQ16: Failed to fetch current week metrics, using fallback:', error);
+    }
 
     // Rank by abs(correlation) vs booking frequency for the chart; keep all for the table.
     const bqFcRanked = [...bqFc.features]
@@ -994,6 +1048,51 @@ export class AnalyticsController {
       </div>
     </div>
 
+    <!-- BQ16: History View Feature Usage -->
+    <div class="section">
+      <h1 class="section-title">History View Feature Usage (BQ16)</h1>
+      <p style="color:var(--muted); margin-top:-0.75rem; margin-bottom:1.25rem; max-width:70ch">
+        What percentage of tutors actively use the History View feature?
+        Metric: <strong>(unique tutors using history view / total active tutors) × 100</strong>
+        For week: <strong>${bq16.weekStart.split('T')[0]}</strong> to <strong>${bq16.weekEnd.split('T')[0]}</strong>
+      </p>
+
+      <div class="stats-grid">
+        <div class="stat-card" style="background:linear-gradient(135deg, rgba(16,185,129,0.1), rgba(59,130,246,0.1))">
+          <div class="stat-value" style="color:#10b981">${bq16.weeklyPercentage.toFixed(1)}%</div>
+          <div class="stat-label">Weekly Usage Rate</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${bq16.uniqueTutorsUsing}</div>
+          <div class="stat-label">Tutors Using Feature</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${bq16.totalActiveTutors}</div>
+          <div class="stat-label">Total Active Tutors</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${bq16.totalEvents}</div>
+          <div class="stat-label">Total Events</div>
+        </div>
+      </div>
+
+      <div class="stats-grid" style="grid-template-columns: 1fr 1fr; margin-top:1.5rem">
+        <div class="chart-card">
+          <h2>Daily Events Trend</h2>
+          <canvas id="bq16EventsChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h2>Daily Active Tutors</h2>
+          <canvas id="bq16TutorsChart"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-top:1.5rem">
+        <h2>Top 10 Tutors by Events</h2>
+        <canvas id="bq16TopTutorsChart"></canvas>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -1013,6 +1112,11 @@ export class AnalyticsController {
     const crashes = ${JSON.stringify(metrics.crashes)};
     const bugs = ${JSON.stringify(metrics.bugs)};
     const latencyIssues = ${JSON.stringify(metrics.latencyIssues)};
+
+    // BQ16 data
+    const bq16Data = ${JSON.stringify(bq16)};
+    const bq16EventsByDay = bq16Data.eventsByDay || [];
+    const bq16TopTutors = bq16Data.topTutors || [];
 
     // System Stability Chart
     new Chart(document.getElementById('stabilityChart'), {
@@ -1247,6 +1351,72 @@ export class AnalyticsController {
         }
       }
     });
+
+    // BQ16: Daily events chart
+    new Chart(document.getElementById('bq16EventsChart'), {
+      type: 'bar',
+      data: {
+        labels: bq16EventsByDay.map(d => d.date.split('-')[2]),
+        datasets: [{
+          label: 'Events',
+          data: bq16EventsByDay.map(d => d.events),
+          backgroundColor: 'rgba(59, 130, 246, 0.8)',
+          borderColor: '#3b82f6',
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        ...chartOptions,
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+      }
+    });
+
+    // BQ16: Daily tutors chart
+    new Chart(document.getElementById('bq16TutorsChart'), {
+      type: 'line',
+      data: {
+        labels: bq16EventsByDay.map(d => d.date.split('-')[2]),
+        datasets: [{
+          label: 'Unique Tutors',
+          data: bq16EventsByDay.map(d => d.uniqueTutors),
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+          borderWidth: 2,
+          tension: 0.4,
+          fill: true,
+          pointRadius: 5,
+          pointBackgroundColor: '#10b981'
+        }]
+      },
+      options: {
+        ...chartOptions,
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+
+    // BQ16: Top tutors chart
+    if (bq16TopTutors.length > 0) {
+      new Chart(document.getElementById('bq16TopTutorsChart'), {
+        type: 'bar',
+        data: {
+          labels: bq16TopTutors.slice(0, 10).map(t => t.tutorName || t.tutorId),
+          datasets: [{
+            label: 'Events',
+            data: bq16TopTutors.slice(0, 10).map(t => t.eventCount),
+            backgroundColor: 'rgba(249, 115, 22, 0.8)',
+            borderColor: '#f97316',
+            borderWidth: 1,
+            borderRadius: 4,
+          }]
+        },
+        options: {
+          ...chartOptions,
+          indexAxis: 'y',
+          scales: { x: { beginAtZero: true } }
+        }
+      });
+    }
   </script>
 </body>
 </html>
@@ -1305,5 +1475,199 @@ export class AnalyticsController {
       studentName: result.studentName,
       minutesToStart: result.minutesToStart,
     };
+  }
+
+  /**
+   * BQ16: POST /analytics/history/bq16
+   * Receives history view events from tutors
+   */
+  @Post('history/bq16')
+  @ApiOperation({
+    summary: 'BQ16: Track history view event',
+    description: 'Stores history view events for tracking weekly tutor engagement with the history feature.',
+  })
+  @ApiResponse({ status: 201, description: 'History view event saved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid request body' })
+  async logHistoryViewEvent(@Body() dto: CreateHistoryAnalyticsEventDto) {
+    this.logger.log(
+      `BQ16: Received history view event for tutor ${dto.tutorId}: ${dto.eventType}`,
+    );
+
+    const event = await this.historyAnalyticsService.logHistoryViewEvent(
+      dto.tutorId,
+      dto.eventType,
+      dto.timestamp,
+      dto.metadata,
+    );
+
+    return {
+      success: true,
+      eventId: event.id,
+      message: 'History view event logged successfully',
+    };
+  }
+
+  /**
+   * BQ16: GET /analytics/history/bq16
+   * Returns BQ16 metrics for the current week
+   */
+  @Get('history/bq16')
+  @ApiOperation({
+    summary: 'BQ16: Weekly history view engagement metrics',
+    description:
+      'Returns the weekly percentage of tutors using the history view feature. ' +
+      'Formula: (unique tutors using history view / total active tutors) * 100',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'BQ16 analytics for current week',
+    type: BQ16HistoryAnalyticsResponseDto,
+  })
+  @ApiResponse({ status: 500, description: 'Error calculating analytics' })
+  async getBQ16CurrentWeek() {
+    try {
+      this.logger.log('BQ16: Fetching current week history view analytics');
+      const data = await this.historyAnalyticsService.getCurrentWeekBQ16();
+
+      return {
+        success: true,
+        data,
+      };
+    } catch (error) {
+      this.logger.error('BQ16: Error fetching current week analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * BQ16: GET /analytics/history/bq16/week?start=2026-05-25&end=2026-05-31
+   * Returns BQ16 metrics for a specific week
+   */
+  @Get('history/bq16/week')
+  @ApiOperation({
+    summary: 'BQ16: History view metrics for a specific week',
+    description: 'Returns BQ16 metrics for a user-specified week date range.',
+  })
+  @ApiQuery({
+    name: 'start',
+    required: true,
+    description: 'Week start date (ISO 8601)',
+    example: '2026-05-25',
+  })
+  @ApiQuery({
+    name: 'end',
+    required: true,
+    description: 'Week end date (ISO 8601)',
+    example: '2026-05-31',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'BQ16 analytics for specified week',
+    type: BQ16HistoryAnalyticsResponseDto,
+  })
+  async getBQ16SpecificWeek(
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    if (!start || !end) {
+      throw new BadRequestException('Query parameters "start" and "end" are required');
+    }
+
+    try {
+      const { weekStart, weekEnd } = this.normalizeBQ16DateRange(start, end);
+      this.logger.log(`BQ16: Fetching analytics for week ${weekStart} to ${weekEnd}`);
+      const data = await this.historyAnalyticsService.calculateBQ16Weekly(weekStart, weekEnd);
+
+      return {
+        success: true,
+        data,
+      };
+    } catch (error) {
+      this.logger.error('BQ16: Error fetching weekly analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * BQ16: GET /analytics/history/bq16/trend?weeks=4
+   * Returns BQ16 metrics for multiple weeks (trend analysis)
+   */
+  @Get('history/bq16/trend')
+  @ApiOperation({
+    summary: 'BQ16: History view engagement trend',
+    description: 'Returns BQ16 metrics for multiple weeks to analyze engagement trends over time.',
+  })
+  @ApiQuery({
+    name: 'weeks',
+    required: false,
+    description: 'Number of weeks to retrieve (default: 4)',
+    type: Number,
+    example: 4,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'BQ16 analytics trend data',
+  })
+  async getBQ16Trend(@Query('weeks') weeks?: string) {
+    try {
+      const numberOfWeeks = weeks ? Math.min(parseInt(weeks), 12) : 4;
+      this.logger.log(`BQ16: Fetching trend for ${numberOfWeeks} weeks`);
+      const data = await this.historyAnalyticsService.getBQ16WeeklyTrend(numberOfWeeks);
+
+      return {
+        success: true,
+        data,
+      };
+    } catch (error) {
+      this.logger.error('BQ16: Error fetching trend analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * BQ16: GET /analytics/history/bq16/daily-breakdown?start=2026-05-25&end=2026-05-31
+   * Returns detailed daily breakdown of history view usage
+   */
+  @Get('history/bq16/daily-breakdown')
+  @ApiOperation({
+    summary: 'BQ16: Daily breakdown of history view events',
+    description: 'Returns event count and unique tutors for each day in the specified week.',
+  })
+  @ApiQuery({
+    name: 'start',
+    required: true,
+    description: 'Week start date (ISO 8601)',
+    example: '2026-05-25',
+  })
+  @ApiQuery({
+    name: 'end',
+    required: true,
+    description: 'Week end date (ISO 8601)',
+    example: '2026-05-31',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Daily breakdown data',
+  })
+  async getBQ16DailyBreakdown(
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    if (!start || !end) {
+      throw new BadRequestException('Query parameters "start" and "end" are required');
+    }
+
+    try {
+      this.logger.log(`BQ16: Fetching daily breakdown for ${start} to ${end}`);
+      const data = await this.historyAnalyticsService.getWeeklyDailyBreakdown(start, end);
+
+      return {
+        success: true,
+        data,
+      };
+    } catch (error) {
+      this.logger.error('BQ16: Error fetching daily breakdown:', error);
+      throw error;
+    }
   }
 }

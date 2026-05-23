@@ -89,4 +89,12 @@ export class UserRepository {
   async delete(id: string): Promise<void> {
     await this.col.doc(id).delete();
   }
+
+  /**
+   * Get all tutors in the system
+   */
+  async findAllTutors(): Promise<User[]> {
+    const snap = await this.col.where('isTutor', '==', true).get();
+    return snap.docs.map(doc => this.toUser(doc.id, doc.data()));
+  }
 }

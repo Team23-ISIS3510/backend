@@ -4,12 +4,14 @@ import { AnalyticsService } from './analytics.service';
 import { AnalyticsBookingService } from './analytics-booking.service';
 import { AnalyticsFeatureCorrelationService } from './analytics-feature-correlation.service';
 import { AnalyticsStudentBookingContextService } from './analytics-student-booking-context.service';
+import { HistoryAnalyticsService } from './analytics-history.service';
 import { FirebaseModule } from '../firebase/firebase.module';
 import { AvailabilityModule } from '../availability/availability.module';
 import { UserModule } from '../user/user.module';
 import { TutoringSessionModule } from '../tutoring-session/tutoring-session.module';
 import { AuthModule } from '../auth/auth.module';
 import { OccupancyRepository } from './repositories/occupancy.repository';
+import { HistoryAnalyticsRepository } from './repositories/history-analytics.repository';
 import { AnalyticsOccupancyUpdateService } from './analytics-occupancy-update.service';
 import { TutoringSessionOccupancyUpdateService } from '../tutoring-session/tutoring-session-occupancy-update.service';
 import { AvailabilityOccupancyUpdateService } from '../availability/availability-occupancy-update.service';
@@ -22,7 +24,9 @@ import { AvailabilityOccupancyUpdateService } from '../availability/availability
     AnalyticsBookingService,
     AnalyticsFeatureCorrelationService,
     AnalyticsStudentBookingContextService,
+    HistoryAnalyticsService,
     OccupancyRepository,
+    HistoryAnalyticsRepository,
     AnalyticsOccupancyUpdateService,
     TutoringSessionOccupancyUpdateService,
     AvailabilityOccupancyUpdateService,
@@ -32,7 +36,9 @@ import { AvailabilityOccupancyUpdateService } from '../availability/availability
     AnalyticsBookingService,
     AnalyticsFeatureCorrelationService,
     AnalyticsStudentBookingContextService,
+    HistoryAnalyticsService,
     OccupancyRepository,
+    HistoryAnalyticsRepository,
     AnalyticsOccupancyUpdateService,
     TutoringSessionOccupancyUpdateService,
     AvailabilityOccupancyUpdateService,

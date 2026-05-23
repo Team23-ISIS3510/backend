@@ -26,7 +26,9 @@
     "seed:minimal": "node scripts/seed-firestore-minimal.js",
     "seed:minimal:clean": "node scripts/seed-firestore-minimal.js --clean",
     "seed:fc-mock": "node scripts/seed-feature-correlation-mock.js",
-    "seed:fc-mock:clean": "node scripts/seed-feature-correlation-mock.js --clean"
+    "seed:fc-mock:clean": "node scripts/seed-feature-correlation-mock.js --clean",
+    "seed:history": "node scripts/seed-history-analytics.js",
+    "seed:history:clean": "node scripts/seed-history-analytics.js --clean"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
