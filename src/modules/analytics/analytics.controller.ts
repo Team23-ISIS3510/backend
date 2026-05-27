@@ -451,6 +451,44 @@ export class AnalyticsController {
   }
 
   /**
+   * BQ9: GET /analytics/profile-update-stats
+   *
+   * Returns how often tutors update their profile and which fields
+   * are most frequently changed.
+   */
+  @Get('profile-update-stats')
+  @ApiOperation({
+    summary: 'BQ9: Tutor profile optimization usage',
+    description:
+      'Aggregates profile_updates logs to show update frequency per field, ' +
+      'total updates, and number of active tutors who have edited their profile.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile update statistics',
+    schema: {
+      example: {
+        success: true,
+        totalUpdates: 42,
+        activeTutors: 8,
+        fields: [
+          { field: 'description', count: 15 },
+          { field: 'courses', count: 12 },
+        ],
+      },
+    },
+  })
+  async getProfileUpdateStats() {
+    try {
+      const data = await this.analyticsService.getProfileUpdateStats();
+      return { success: true, ...data };
+    } catch (error) {
+      this.logger.error('BQ9: Error fetching profile update stats:', error);
+      throw error;
+    }
+  }
+
+  /**
    * BQ10: GET /analytics/booking-source-stats
    *
    * Returns breakdown of sessions booked via carousel vs standard search.
@@ -616,7 +654,7 @@ export class AnalyticsController {
   ) {
     this.logger.log('BQ1: Generating dashboard');
     
-    const [metrics, bq5, bq2, bq10, bqFc, bq15, bq11] = await Promise.all([
+    const [metrics, bq5, bq2, bq10, bqFc, bq15, bq11, bq9] = await Promise.all([
       this.analyticsService.getDashboardData(),
       this.analyticsService.getBookingSuccessData(),
       this.analyticsService.getBQ2DashboardData(),
@@ -624,6 +662,7 @@ export class AnalyticsController {
       this.featureCorrelationService.getStudentFeatureCorrelation(),
       this.analyticsService.getHomepageLoadMetrics(),
       this.analyticsService.getPeakSessionHours(5),
+      this.analyticsService.getProfileUpdateStats(),
     ]);
 
     // Fetch BQ16 with error handling
@@ -909,6 +948,35 @@ export class AnalyticsController {
       <div class="chart-card">
         <h2>Carousel vs Other Bookings</h2>
         <canvas id="bookingSourceChart"></canvas>
+      </div>
+    </div>
+
+    <!-- BQ9: Tutor Profile Optimization Usage -->
+    <div class="section">
+      <h1 class="section-title">Tutor Profile Optimization Usage (BQ9)</h1>
+      <p style="color:var(--muted); margin-top:-0.75rem; margin-bottom:1.25rem; max-width:70ch">
+        How often do tutors update their profiles? Which fields are most frequently changed?
+        Based on <strong>${bq9.totalUpdates}</strong> updates from <strong>${bq9.activeTutors}</strong> active tutors.
+      </p>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${bq9.totalUpdates}</div>
+          <div class="stat-label">Total Profile Updates</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--instant)">${bq9.activeTutors}</div>
+          <div class="stat-label">Active Tutors</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--impression)">${bq9.fields.length > 0 ? bq9.fields[0].field : '—'}</div>
+          <div class="stat-label">Most Updated Field</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>Updates Per Field</h2>
+        <canvas id="bq9Chart"></canvas>
       </div>
     </div>
 
@@ -1349,6 +1417,30 @@ export class AnalyticsController {
           legend: { position: 'bottom', labels: { usePointStyle: true, padding: 15 } },
           tooltip: { callbacks: { label: (ctx) => ctx.label } }
         }
+      }
+    });
+
+    // BQ9: Profile update stats bar chart
+    const bq9Labels = ${JSON.stringify(bq9.fields.map(f => f.field))};
+    const bq9Data = ${JSON.stringify(bq9.fields.map(f => f.count))};
+    new Chart(document.getElementById('bq9Chart'), {
+      type: 'bar',
+      data: {
+        labels: bq9Labels,
+        datasets: [{
+          label: 'Updates',
+          data: bq9Data,
+          backgroundColor: 'rgba(99, 102, 241, 0.8)',
+          borderColor: '#6366f1',
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        ...chartOptions,
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Update Count' } } }
       }
     });
 
