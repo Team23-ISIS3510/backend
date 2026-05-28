@@ -1546,7 +1546,7 @@ export class AnalyticsService {
       };
     } catch (error) {
       this.logger.error('BQ9: Error computing profile update stats:', error);
-      throw error;
+      return { totalUpdates: 0, activeTutors: 0, fields: [] };
     }
   }
 }
