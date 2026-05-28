@@ -83,6 +83,21 @@ export class UserRepository {
     if (dto.isTutor === false) patch.courses = [];
   
     await docRef.update(patch);
+
+    // BQ9: log which fields were updated to profile_updates collection
+    const updatedFields = Object.keys(patch).filter(k => k !== 'updatedAt');
+    if (updatedFields.length > 0) {
+      try {
+        await this.firebase.getFirestore().collection('profile_updates').add({
+          tutorId: id,
+          fields: updatedFields,
+          timestamp: this.firebase.getTimestamp(),
+        });
+      } catch (e) {
+        this.logger.warn(`BQ9: Failed to log profile update for ${id}`, e);
+      }
+    }
+
     return (await this.findById(id))!;
   }
 

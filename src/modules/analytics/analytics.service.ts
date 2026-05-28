@@ -1500,4 +1500,53 @@ export class AnalyticsService {
       return { cancellationRate: 0, totalCancellations: 0, totalConfirmed: 0 };
     }
   }
+
+  // ── BQ9: Profile Optimization Usage ─────────────────────────────────────
+
+  /**
+   * Aggregates profile_updates collection: count per field, total updates,
+   * and distinct active tutors.
+   */
+  async getProfileUpdateStats(): Promise<{
+    totalUpdates: number;
+    activeTutors: number;
+    fields: { field: string; count: number }[];
+  }> {
+    try {
+      this.logger.log('BQ9: Computing profile update stats');
+      const db = this.firebaseService.getFirestore();
+      const snapshot = await db.collection('profile_updates').get();
+
+      if (snapshot.empty) {
+        return { totalUpdates: 0, activeTutors: 0, fields: [] };
+      }
+
+      const fieldCounts: Record<string, number> = {};
+      const tutorIds = new Set<string>();
+
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        tutorIds.add(data.tutorId);
+        const fields = data.fields as string[] | undefined;
+        if (Array.isArray(fields)) {
+          for (const f of fields) {
+            fieldCounts[f] = (fieldCounts[f] ?? 0) + 1;
+          }
+        }
+      }
+
+      const fields = Object.entries(fieldCounts)
+        .map(([field, count]) => ({ field, count }))
+        .sort((a, b) => b.count - a.count);
+
+      return {
+        totalUpdates: snapshot.size,
+        activeTutors: tutorIds.size,
+        fields,
+      };
+    } catch (error) {
+      this.logger.error('BQ9: Error computing profile update stats:', error);
+      return { totalUpdates: 0, activeTutors: 0, fields: [] };
+    }
+  }
 }
